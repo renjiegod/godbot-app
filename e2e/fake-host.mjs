@@ -2,6 +2,9 @@
 // same HostLink and DeviceRegistry that Godbot runs (godbot/link), a one-Bot team, and a
 // pairing link on stdout. Messages the phone sends are printed as `SENT <text>`; a push key
 // the phone hands over is printed as `PUSH_KEY <deviceId>`; every handshake as `HELLO <ms>`.
+// A line `NOTICE <text>` on stdin raises an approval notice, as Godbot's addNotice does: a
+// linked phone gets it at once, the others when they catch up (`notices`); it prints
+// `NOTICE <seq>`.
 //
 //   node e2e/fake-host.mjs ws://127.0.0.1:<relay port>/v1/link [--incompatible]
 //
@@ -25,15 +28,20 @@ const bot = { id: 'b-lead', name: 'GodBot', role: 'Team Lead', main: true, color
 const team = () => ({ revision, bots: [{ ...bot, preview: items.at(-1)?.text ?? '' }], rooms: [], mainBotId: bot.id, mainBotIds: [bot.id], models: [], prefs: {} })
 
 let link
+let noticeSeq = 0
+const notices = []
 const answer = (endpoint, body) => {
   switch (endpoint) {
     case 'hello': {
       console.log(`HELLO ${Date.now()}`)
       // A Godbot older than the app has no API version in common with it.
-      return { api: incompatible ? null : 1, apiMin: 1, apiMax: 1, plugin: { name: 'dsh-godbot', version: 'e2e' }, capabilities: ['rpc'], boot, seq: 0, revision, readOnly: false, memory: false, feed: 'api/godbot/team/feed' }
+      return { api: incompatible ? null : 1, apiMin: 1, apiMax: 1, plugin: { name: 'dsh-godbot', version: 'e2e' }, capabilities: ['rpc'], boot, seq: noticeSeq, revision, readOnly: false, memory: false, feed: 'api/godbot/team/feed' }
     }
     case 'state': return body?.since === revision ? { revision, unchanged: true } : team()
-    case 'notices': return { boot, seq: 0, notices: [] }
+    case 'notices': {
+      const since = Number(body?.since ?? 0)
+      return body?.boot === boot ? { boot, seq: noticeSeq, notices: notices.filter(notice => notice.seq > since) } : { boot, seq: noticeSeq, reset: true, notices: [] }
+    }
     case 'avatar': return { ref: null, image: null }
     case 'chat': return { sessionId: bot.sessionId, items, cursor: null }
     case 'send': {
@@ -82,6 +90,21 @@ link.start()
 
 const { code } = registry.openPairing()
 console.log(`PAIRING ${pairingUri({ server, hostDeviceId: identity.deviceId, hostKey: identity.publicKey, code, name: 'e2e computer' })}`)
+let input = ''
+process.stdin.setEncoding('utf8')
+process.stdin.on('data', chunk => {
+  input += chunk
+  for (let end = input.indexOf('\n'); end >= 0; end = input.indexOf('\n')) {
+    const line = input.slice(0, end).trim()
+    input = input.slice(end + 1)
+    if (!line.startsWith('NOTICE ')) continue
+    noticeSeq += 1
+    const notice = { kind: 'approval', name: bot.name, title: '', text: line.slice('NOTICE '.length), botId: bot.id, sessionId: bot.sessionId, seq: noticeSeq, time: Date.now() }
+    notices.push(notice)
+    link?.emit('notice', notice)
+    console.log(`NOTICE ${noticeSeq}`)
+  }
+})
 const stop = () => { void link.stop(); process.exit(0) }
 process.on('SIGTERM', stop)
 process.on('SIGINT', stop)

@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 // Modified for Godbot. See NOTICE.
 import { parsePairingUri } from '../../godbot/link/index.ts'
 import { openLink } from '../connection.ts'
+import { linkManager } from '../team/link.ts'
 import { addComputer, type PhoneIdentity, type SavedComputer } from '../store.ts'
 import { errorText } from '../team/link.ts'
 import { previewPairing, type PairingPreview } from '../team/pairing-link.ts'
@@ -22,6 +23,9 @@ export function Pair({ identity, offer, onPaired, onCancel }: { identity: PhoneI
   // person to confirm the computer and its Server: nothing is sent before that.
   const [confirm, setConfirm] = useState<PairingPreview | null>(null)
   const busyRef = useRef(false)
+  // The relay keeps one connection per phone: "Keep connected in background" lets go of its
+  // link while this screen pairs, and takes it back after.
+  useEffect(() => linkManager.pause(), [])
 
   const pair = useCallback(async (uri: string) => {
     if (busyRef.current) return

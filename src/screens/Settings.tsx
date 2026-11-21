@@ -2,6 +2,7 @@
 import { Children, Fragment, useCallback, useEffect, useState } from 'react'
 import { AppState, Linking, PermissionsAndroid, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
 import { useTeam } from '../team/context.tsx'
+import { GodbotNative } from '../../modules/godbot-native/index.ts'
 import { keepAliveSupported, setKeepAlive } from '../team/keepalive.ts'
 import { androidNotificationStatus } from '../team/notifications.ts'
 import { onPushState, pushState, pushStatusText, setupPushAgain } from '../team/push-link.ts'
@@ -76,13 +77,17 @@ export function Settings({ navigation }: { navigation?: any }) {
     if (Platform.OS !== 'android' || androidSdk < 33) return
     void PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS).then(setNotifAllowed, () => {})
   }, [androidSdk])
+  // Whether Android leaves the keep-alive out of battery optimization; read again on return
+  // from the system page.
+  const [batteryFree, setBatteryFree] = useState(() => GodbotNative?.isIgnoringBatteryOptimizations() ?? false)
+  const refreshBattery = useCallback(() => { setBatteryFree(GodbotNative?.isIgnoringBatteryOptimizations() ?? false) }, [])
   useEffect(() => {
     void readPrefs().then(setPrefs)
     refreshNotif()
     if (Platform.OS !== 'android') return
-    const sub = AppState.addEventListener('change', next => { if (next === 'active') refreshNotif() })
+    const sub = AppState.addEventListener('change', next => { if (next === 'active') { refreshNotif(); refreshBattery() } })
     return () => sub.remove()
-  }, [refreshNotif])
+  }, [refreshNotif, refreshBattery])
   const set = (key: string, value: string) => { const next = { ...prefs, [key]: value }; setPrefs(next); void writePrefs({ [key]: value }) }
   const openNotifications = () => {
     if (Platform.OS !== 'android') return
@@ -123,6 +128,13 @@ export function Settings({ navigation }: { navigation?: any }) {
         {Platform.OS === 'android' ? <Row label={t('Notifications')} value={notifStatus !== undefined ? t(notifStatus) : undefined} onPress={openNotifications} /> : null}
         {keepAliveSupported() ? <Row label={t('Keep connected in background')} hint={t('Keeps the link open with an ongoing notification. Uses more battery.')}
           end={<Switch accessibilityLabel={t('Keep connected in background')} value={prefs.keepAlive === 'on'} onValueChange={toggleKeepAlive} trackColor={{ false: p.line2, true: p.accent }} thumbColor={p.knob} />} /> : null}
+        {/* Phone makers stop background apps their own way: on these two system pages the person lets Godbot keep running. */}
+        {keepAliveSupported() && prefs.keepAlive === 'on' ? <Row label={t('Battery optimization')} value={batteryFree ? t('Not restricted') : t('Restricted')}
+          hint={batteryFree ? undefined : t('Android may cut the link to save battery. Tap to let Godbot run in the background.')}
+          onPress={() => { GodbotNative?.requestIgnoreBatteryOptimizations() }} /> : null}
+        {keepAliveSupported() && prefs.keepAlive === 'on' ? <Row label={t('Auto-start and lock')}
+          hint={t('Let Godbot start on its own and run in the background without limits, then lock it in Recents. The link then survives a reboot and clearing Recents.')}
+          onPress={() => { GodbotNative?.openAutoStartSettings() }} /> : null}
         <Row label={t('Push notifications')} hint={pushStatusText(push, t)}
           end={<Switch accessibilityLabel={t('Push notifications')} value={prefs.push !== 'off'} onValueChange={togglePush} trackColor={{ false: p.line2, true: p.accent }} thumbColor={p.knob} />} />
       </Section>
