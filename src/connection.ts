@@ -145,8 +145,12 @@ export interface ShownView { id?: string; title?: string; view?: unknown }
 const relays = new WeakMap<RpcClient, RelayTransport>()
 export const relayOf = (client: RpcClient): RelayTransport | undefined => relays.get(client)
 
-/** Opens the encrypted link to the computer. The pairing code goes only with the first connection. */
-export async function openLink(computer: SavedComputer, identity: PhoneIdentity, pairingCode?: string): Promise<RpcClient> {
+/**
+ * Opens the encrypted link to the computer. The pairing code goes only with the first
+ * connection. `onClient` gets the client before the handshake, so the caller can close an
+ * attempt that never finishes (in the background no JS timer fires to time it out).
+ */
+export async function openLink(computer: SavedComputer, identity: PhoneIdentity, pairingCode?: string, onClient?: (client: RpcClient) => void): Promise<RpcClient> {
   const relay = new RelayTransport(computer.server, {
     deviceId: identity.deviceId,
     identityKey: identity.publicKey,
@@ -160,6 +164,7 @@ export async function openLink(computer: SavedComputer, identity: PhoneIdentity,
   })
   const client = new RpcClient(secure)
   relays.set(client, relay)
+  onClient?.(client)
   await client.connect()
   return client
 }

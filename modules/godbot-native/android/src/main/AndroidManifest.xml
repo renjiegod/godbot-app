@@ -2,6 +2,25 @@
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
   <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+  <!-- "Keep connected in background" comes back after a reboot, watches the network, and asks
+       to be left out of battery optimization. -->
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+  <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+  <!-- The phone makers' auto-start pages that Settings opens (GodbotNativeModule). -->
+  <queries>
+    <package android:name="com.miui.securitycenter" />
+    <package android:name="com.huawei.systemmanager" />
+    <package android:name="com.hihonor.systemmanager" />
+    <package android:name="com.coloros.safecenter" />
+    <package android:name="com.oppo.safe" />
+    <package android:name="com.vivo.permissionmanager" />
+    <package android:name="com.iqoo.secure" />
+    <package android:name="com.oneplus.security" />
+    <package android:name="com.samsung.android.lool" />
+  </queries>
+
   <application>
     <!-- Keeps the app's process, and with it the encrypted link, alive in the background
          while the person has turned this on in Settings. -->
@@ -11,8 +30,22 @@
       android:foregroundServiceType="specialUse">
       <property
         android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-        android:value="Keeps the end-to-end encrypted link to the user's own computer open while the app is in the background, so approvals and questions from the user's Godbot team reach the phone at once. Started and stopped only by the user in Settings." />
+        android:value="Keeps the end-to-end encrypted link to the user's own computer open while the app is in the background, so approvals and questions from the user's Godbot team reach the phone at once. Started and stopped only by the user in Settings; after a reboot it resumes only if the user left it on." />
     </service>
+    <!-- Runs the JavaScript side of the keep-alive with no screen up (after a reboot, or when
+         Android restarted the service). -->
+    <service
+      android:name="expo.modules.godbotnative.KeepAliveTaskService"
+      android:exported="false" />
+    <!-- Resumes the keep-alive after a reboot or an app update, if the person left it on. -->
+    <receiver
+      android:name="expo.modules.godbotnative.BootReceiver"
+      android:exported="true">
+      <intent-filter>
+        <action android:name="android.intent.action.BOOT_COMPLETED" />
+        <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+      </intent-filter>
+    </receiver>
     <!-- Hands a downloaded update to the system package installer. -->
     <provider
       android:name="expo.modules.godbotnative.GodbotFileProvider"

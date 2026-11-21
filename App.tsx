@@ -10,7 +10,7 @@ import { loadComputer, loadIdentity, onPrefsChange, readPrefs, setActiveComputer
 import { ComputersCtx, type ComputerActions } from './src/nav/computers.ts'
 import { errorText } from './src/team/link.ts'
 import { isPairingLink } from './src/team/pairing-link.ts'
-import { syncKeepAlive } from './src/team/keepalive.ts'
+import { pauseKeepAlive, syncKeepAlive } from './src/team/keepalive.ts'
 import { loadSeen } from './src/team/seen.ts'
 import { DEMO, DemoProvider, TeamProvider, useTeam } from './src/team/context.tsx'
 import { ErrorBoundary } from './src/ui/error-boundary.tsx'
@@ -103,6 +103,9 @@ function Boot() {
   const [offer, setOffer] = useState<string | null>(null)
   const [seenReady, setSeenReady] = useState(false)
   const lang = useLang()
+
+  // With no computer left (the last one was forgotten) there is nothing to keep a link to.
+  useEffect(() => { if (computer === null) pauseKeepAlive() }, [computer])
 
   useEffect(() => {
     void loadSeen().finally(() => setSeenReady(true))
