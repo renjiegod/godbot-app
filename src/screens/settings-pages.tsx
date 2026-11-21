@@ -888,7 +888,7 @@ export function About({ navigation }: any) {
         </Section>
         <Section label={t('Licenses')}>
           <Row label="Godbot" hint="github.com/renjiegod/dsh-godbot" onPress={() => void Linking.openURL('https://github.com/renjiegod/dsh-godbot')} />
-          <Row label={t('Based on DS Bot')} hint={t('Apache License 2.0')} onPress={() => void Linking.openURL('https://github.com/Fei2411/DS-Bot/blob/main/LICENSE')} />
+          <Row label={t('Phone app')} hint="Apache-2.0" onPress={() => void Linking.openURL('https://www.apache.org/licenses/LICENSE-2.0')} />
         </Section>
       </ScrollView>
     </Screen>

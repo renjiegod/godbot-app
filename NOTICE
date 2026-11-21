@@ -50,6 +50,9 @@ Godbot
 Godbot (https://github.com/renjiegod/dsh-godbot)
 MIT License, Copyright (c) 2026 renjiegod
 
+The app icon and its Android variants use the icon served by dsh-godbot,
+src/host/assets/godbot-icon-f6555c02601e.png.
+
 scripts/sync-godbot.mjs copies these files from a dsh-godbot checkout into godbot/
 unchanged; godbot/SOURCE.json records the commit and each file's SHA-256:
 

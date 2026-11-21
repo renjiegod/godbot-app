@@ -85,9 +85,8 @@ For a local pairing test, start a relay and run `npm run e2e:fake-host -- ws://1
 
 ## License and credits
 
-Godbot for Android is licensed under the [Apache License 2.0](LICENSE) and is based on the [DS Bot phone app][ds-bot]. See [NOTICE](NOTICE) for upstream revisions and attribution. [DSH Go][dsh-go] served as a reference for this README.
+Godbot for Android is licensed under the [Apache License 2.0](LICENSE). [NOTICE](NOTICE) records third-party licenses and source attribution. [DSH Go][dsh-go] served as a reference for this README.
 
 [releases]: https://github.com/renjiegod/godbot-app/releases/latest
 [desktop]: https://github.com/renjiegod/dsh-godbot#readme
-[ds-bot]: https://github.com/Fei2411/DS-Bot/tree/5e9b7da8882da3b68d8a0624342708c2150a9156/mobile
 [dsh-go]: https://github.com/ccch1mneyyy/dsh-Go
