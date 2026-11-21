@@ -1,0 +1,27 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+  <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+  <application>
+    <!-- Keeps the app's process, and with it the encrypted link, alive in the background
+         while the person has turned this on in Settings. -->
+    <service
+      android:name="expo.modules.godbotnative.KeepAliveService"
+      android:exported="false"
+      android:foregroundServiceType="specialUse">
+      <property
+        android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+        android:value="Keeps the end-to-end encrypted link to the user's own computer open while the app is in the background, so approvals and questions from the user's Godbot team reach the phone at once. Started and stopped only by the user in Settings." />
+    </service>
+    <!-- Hands a downloaded update to the system package installer. -->
+    <provider
+      android:name="expo.modules.godbotnative.GodbotFileProvider"
+      android:authorities="${applicationId}.godbot.files"
+      android:exported="false"
+      android:grantUriPermissions="true">
+      <meta-data
+        android:name="android.support.FILE_PROVIDER_PATHS"
+        android:resource="@xml/godbot_file_paths" />
+    </provider>
+  </application>
+</manifest>

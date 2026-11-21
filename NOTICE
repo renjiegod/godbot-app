@@ -1,0 +1,117 @@
+Godbot for Android
+Copyright 2026 renjiegod
+
+This app is a modified version of the DS Bot phone app and is licensed under the
+Apache License, Version 2.0 (see LICENSE).
+
+==============================================================================
+DS Bot
+==============================================================================
+
+DS Bot
+Copyright 2026 Fei2411 and the DS Bot contributors
+https://github.com/Fei2411/DS-Bot
+Source revision: 5e9b7da8882da3b68d8a0624342708c2150a9156 (0.3.8), directory mobile/
+License: Apache License, Version 2.0 (LICENSE)
+
+Everything outside godbot/ and modules/godbot-native/ started as that directory.
+Files changed for Godbot say "Modified for Godbot" at the top, or mark the changed
+parts with "Godbot:". The changes:
+
+  - Android only: the iOS archive script, the ios/ios:archive scripts, the iOS block
+    of app.json and the iOS build settings of app.config.js are removed.
+  - Name, scheme (godbot://), Android package (io.github.renjiegod.godbot), storage
+    keys (godbot.*), demo flag (EXPO_PUBLIC_GODBOT_DEMO), signing variables
+    (GODBOT_ANDROID_*). The version comes from this app's own package.json.
+  - Shared code comes from Godbot (godbot/, below) instead of ds-bot/src/client,
+    ds-bot/src/shared and link/src, so the app draws Godbot's main Bot and themes.
+  - The handshake names the API versions the app speaks and checks the computer's
+    plugin; an incompatible computer is retried with a growing delay and an upgrade
+    hint, and DS Bot on the other end is named.
+  - A pairing link opened from outside the app asks for confirmation (computer name
+    and Server) before anything is sent. Both godbot:// and dsbot:// links pair.
+  - The Updates page shows Godbot's update phases and its update mode.
+  - Errors from the computer that the app cannot translate show exactly as they came.
+  - Bot browsers that Godbot runs in its own environments get a clear message.
+  - Side chat reads state incrementally instead of the whole state every 1.5 s.
+  - Forgetting a computer also forgets its push key.
+  - New: end-to-end encrypted push (src/team/push-*.ts, fcm.ts, notify.ts),
+    "Keep connected in background" (src/team/keepalive.ts and the native module),
+    background notifications for notices, and in-app updates of this app
+    (src/team/app-update*.ts).
+  - New config plugins: plugins/network-security.js (cleartext only to localhost,
+    127.0.0.1 and 10.0.2.2) and plugins/fcm.js (Firebase only when
+    GODBOT_GOOGLE_SERVICES_JSON names a google-services.json).
+
+==============================================================================
+Godbot
+==============================================================================
+
+Godbot (https://github.com/renjiegod/dsh-godbot)
+MIT License, Copyright (c) 2026 renjiegod
+
+scripts/sync-godbot.mjs copies these files from a dsh-godbot checkout into godbot/
+unchanged; godbot/SOURCE.json records the commit and each file's SHA-256:
+
+  - godbot/link/ is dsh-godbot's src/link: DS Bot's link/src (Apache License 2.0,
+    see above) with Godbot's push extension and the godbot:// pairing scheme.
+  - godbot/client/ is dsh-godbot's src/client/theme.js and src/client/team-ui/
+    {themes,inks,characters,sources,i18n}.js with its locales. They derive from DS
+    Bot's src/client (Apache License 2.0).
+  - godbot/shared/ is dsh-godbot's src/host/team-runtime/shared/{im-platforms,
+    file-chunks}.js, from DS Bot's src/shared (Apache License 2.0).
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+
+==============================================================================
+Notices carried over from DS Bot
+==============================================================================
+
+DSH Remote (https://github.com/liguobao/deepseek-harness-remote)
+MIT License, Copyright (c) 2026 DSH Remote contributors
+
+  The phone link code in DS Bot's link/ (here godbot/link/) adapts code from
+  commit 4d888ad of DSH Remote. DS Bot changed the names, the Noise prologue
+  label, the fragment marker, the hello and the pairing, so the protocol is DS
+  Bot's own and does not talk to DSH Remote.
+  - link/noise.ts adapts packages/crypto/src/noise.ts (the Noise IK session and
+    the remote-key check).
+  - link/keys.ts copies the key pair, fingerprint and Base64URL functions of
+    packages/crypto/src/index.ts.
+  - link/frames.ts adapts packages/protocol/src/index.ts: the control frame and
+    message envelopes, the frame size limits, and SecureMessageCodec. It checks
+    frames by hand instead of with zod.
+  - link/transport.ts copies packages/webrtc/src/transport.ts and
+    packages/webrtc/src/websocket-backpressure.ts.
+  - link/relay-transport.ts adapts RelayTransport in packages/webrtc/src/index.ts.
+  - link/secure-transport.ts adapts apps/android/src/services/secure-transport.ts.
+  - link/rpc-client.ts adapts RemoteClientCore in packages/client-core/src/index.ts.
+  - link/host.ts follows the flow of HostServerConnection in
+    packages/plugin/src/server-connection.ts (reconnect, connect.incoming, the
+    responder handshake, Relay sends), written again for DS Bot.
+  - src/polyfills.ts copies apps/android/src/polyfills.ts.
+
+  Full license text: the same MIT terms as printed under Godbot above, with the
+  copyright line of DSH Remote.
+
+The app bundles, from npm, Expo and React Native (MIT, Copyright (c) 650
+Industries, Inc. and Meta Platforms, Inc. and affiliates). The phone link uses
+@noble/ciphers, @noble/curves and @noble/hashes (MIT, Copyright (c) Paul Miller)
+and @lukeburns/clatterjs (MIT, Copyright (c) 2025 Joni Lepistö). Simple Icons
+vector marks used by DS Bot's icons are CC0 1.0 (the Simple Icons contributors).
