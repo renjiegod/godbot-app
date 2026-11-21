@@ -6,7 +6,7 @@ import * as Haptics from 'expo-haptics'
 import { downloadFile } from '../team/file-download.ts'
 import * as Sharing from 'expo-sharing'
 import type { Approval, Bot, Question, Room } from '../connection.ts'
-import { createChatCache } from '../team/chat-cache.ts'
+import { createChatCache, joinChatItems } from '../team/chat-cache.ts'
 import { connectorCanConnectOnMobile } from '../team/connectors.ts'
 import { useTeam } from '../team/context.tsx'
 import { markSeen } from '../team/seen.ts'
@@ -28,7 +28,8 @@ const POLL_MS = 15_000
 // is the safe area, which the keyboard covers.
 const KEYBOARD_GAP = 6
 
-interface ChatPage { sessionId?: string; items: ChatItem[]; cursor: unknown }
+interface ChatPage { sessionId?: string; items: ChatItem[]; cursor: unknown; inlineTools?: boolean }
+interface ChatWindow { key: string; page: ChatPage | null; older: ChatItem[]; olderCursor?: unknown }
 interface Row { item: ChatItem; key: string; stamp?: string }
 
 // A refreshed page reuses the item objects that did not change, so the memoized
@@ -69,7 +70,7 @@ function keepScrollOffset(key: string, offset: number): void {
 // for while the team state is still on its way, and the chat takes that answer.
 const reads = new Map<string, Promise<ChatPage>>()
 const readChat = (call: (endpoint: string, payload?: unknown) => Promise<unknown>, room: boolean, id: string) =>
-  (room ? call('room-chat', { roomId: id, steps: true }) : call('chat', { botId: id, steps: true })) as Promise<ChatPage>
+  (room ? call('room-chat', { roomId: id, steps: true }) : call('chat', { botId: id, steps: true, inlineTools: true })) as Promise<ChatPage>
 export function prefetchChat(call: (endpoint: string, payload?: unknown) => Promise<unknown>, computerId: string, target: { kind: 'bot' | 'room'; id: string }) {
   const key = `${computerId}:${target.kind}:${target.id}`
   if (pages.has(key) || reads.has(key)) return
@@ -108,14 +109,16 @@ export function ChatView({ bot, room, header, onMissing }: { bot?: Bot; room?: R
   const id = bot?.id ?? room?.id ?? ''
   const chatKey = `${computer?.hostDeviceId ?? ''}:${room !== undefined ? 'room' : 'bot'}:${id}`
   const cached = pages.get(chatKey)
-  const [pageState, setPageState] = useState<{ key: string; page: ChatPage | null; older: ChatItem[] }>(() => ({
+  const [pageState, setPageState] = useState<ChatWindow>(() => ({
     key: chatKey,
     page: cached?.page ?? null,
     older: cached?.older ?? [],
+    olderCursor: cached?.cursor,
   }))
   const page = pageState.key === chatKey ? pageState.page : (cached?.page ?? null)
   const older = pageState.key === chatKey ? pageState.older : (cached?.older ?? [])
-  const cursor = useRef<unknown>(cached?.cursor)
+  const olderCursor = pageState.key === chatKey ? pageState.olderCursor : cached?.cursor
+  const cursor = olderCursor === undefined ? page?.cursor : olderCursor
   const [gone, setGone] = useState(false)
   const [openSteps, setOpenSteps] = useState<Record<string, boolean>>({})
   // A failed load clears itself on the next good one.
@@ -154,7 +157,7 @@ export function ChatView({ bot, room, header, onMissing }: { bot?: Bot; room?: R
         let botCount = 0
         for (let i = next.items.length - 1; i >= 0; i -= 1) {
           const entry = next.items[i]
-          if (entry.kind === 'bot' || entry.kind === 'post') {
+          if (!entry.live && (entry.kind === 'bot' || entry.kind === 'post')) {
             if (lastBot === undefined) lastBot = entry
             botCount += 1
           }
@@ -162,14 +165,19 @@ export function ChatView({ bot, room, header, onMissing }: { bot?: Bot; room?: R
         const sig = `${next.sessionId ?? ''}:${botCount}:${lastBot?.id ?? lastBot?.seq ?? ''}:${lastBot?.text?.length ?? ''}`
         if (prevSigRef.current !== '' && prevSigRef.current !== sig) bumpMarkdownImageCache()
         prevSigRef.current = sig
-        setPageState(prev => ({
-          key: chatKey,
-          older: prev.key === chatKey ? prev.older : [],
-          page: prev.key === chatKey && prev.page !== null && prev.page.sessionId === next.sessionId
-            ? { ...next, items: keepSame(prev.page.items, next.items) }
-            : next,
-        }))
-        if (cursor.current === undefined) cursor.current = next.cursor
+        setPageState(prev => {
+          if (prev.key !== chatKey || !prev.page || prev.page.sessionId !== next.sessionId)
+            return { key: chatKey, page: next, older: [] }
+          const page = { ...next, items: keepSame(prev.page.items, next.items) }
+          if (prev.olderCursor !== undefined && JSON.stringify(prev.page.cursor) !== JSON.stringify(next.cursor)) {
+            // The latest page slid forward. Keep the rows already read above
+            // its new boundary, or re-page from the new cut after a long gap.
+            const cut = keysOf(prev.page.items).indexOf(keysOf(next.items)[0])
+            if (cut < 0) return { key: chatKey, page, older: [] }
+            return { ...prev, page, older: [...prev.older, ...prev.page.items.slice(0, cut).filter(row => !row.live)] }
+          }
+          return { ...prev, page }
+        })
         setLoadError(null)
       }
     } catch (failure) {
@@ -190,8 +198,7 @@ export function ChatView({ bot, room, header, onMissing }: { bot?: Bot; room?: R
   useEffect(() => {
     const gen = ++generation.current
     const kept = pages.get(chatKey)
-    setPageState({ key: chatKey, page: kept?.page ?? null, older: kept?.older ?? [] })
-    cursor.current = kept?.cursor
+    setPageState({ key: chatKey, page: kept?.page ?? null, older: kept?.older ?? [], olderCursor: kept?.cursor })
     setGone(false)
     const saved = scrollOffsets.get(chatKey) ?? 0
     offsetRef.current = saved
@@ -220,31 +227,34 @@ export function ChatView({ bot, room, header, onMissing }: { bot?: Bot; room?: R
 
   // What this chat shows is kept for the next visit.
   useEffect(() => {
-    if (pageState.page !== null) pages.keep(chatKey, pageState.key, { page: pageState.page, older: pageState.older, cursor: cursor.current })
+    if (pageState.page !== null) pages.keep(chatKey, pageState.key, { page: pageState.page, older: pageState.older, cursor: pageState.olderCursor })
   }, [pageState, chatKey])
 
-  // The page before the oldest one shown. cursor lives in a ref: the list can ask
-  // again before the state from the previous load commits.
+  // Accept a previous page only if it still adjoins this chat's visible window.
   const loadMore = useCallback(async () => {
-    if (cursor.current == null || id === '' || loading.current) return
+    if (cursor == null || id === '' || loading.current) return
     const gen = generation.current
     loading.current = true
     setLoadingOlder(true)
     try {
       const next = (room !== undefined
-        ? await call('room-chat', { roomId: room.id, cursor: cursor.current, steps: true })
-        : await call('chat', { botId: id, cursor: cursor.current, steps: true })) as ChatPage
+        ? await call('room-chat', { roomId: room.id, cursor, steps: true })
+        : await call('chat', { botId: id, cursor, steps: true, inlineTools: true })) as ChatPage
       if (generation.current !== gen) return
-      cursor.current = next.cursor
-      setPageState(prev => (prev.key !== chatKey ? prev : { ...prev, older: [...next.items, ...prev.older] }))
+      setPageState(prev => {
+        const boundary = prev.olderCursor === undefined ? prev.page?.cursor : prev.olderCursor
+        return prev.key !== chatKey || prev.page?.sessionId !== page?.sessionId || JSON.stringify(boundary) !== JSON.stringify(cursor)
+          ? prev : { ...prev, olderCursor: next.cursor, older: [...next.items, ...prev.older] }
+      })
     } catch { /* keep the page we have */ }
     finally { loading.current = false; setLoadingOlder(false) }
-  }, [call, id, room?.id, chatKey])
+  }, [call, id, room?.id, chatKey, cursor, page?.sessionId])
 
   const sessionId = page?.sessionId ?? bot?.sessionId ?? room?.id ?? id
   const question: Question | undefined = team?.questions?.[sessionId]
   const approvals = (team?.work?.approvals ?? []).filter((entry: Approval) => entry.sessionId === sessionId || (entry.roomId !== undefined && entry.roomId === room?.id))
   const doing = bot !== undefined ? team?.work?.bots?.[bot.id] ?? team?.activity?.[bot.id] : undefined
+  const activeTool = doing && !doing.tool ? page?.items.findLast(item => item.kind === 'tool' && item.status === 'running') : undefined
   const secrets = (team?.secretRequests?.[bot?.id ?? ''] ?? []).filter((r: { status?: string }) => r.status === 'pending')
   const connectorRequests = (team?.connectorRequests?.[bot?.id ?? ''] ?? []).filter((r: { status?: string }) => r.status === 'pending')
   const handoff = (team as { browserHolds?: Record<string, { callId?: string; reason?: string; note?: string }> } | null)?.browserHolds?.[bot?.id ?? '']
@@ -253,7 +263,8 @@ export function ChatView({ bot, room, header, onMissing }: { bot?: Bot; room?: R
   const roomWork = room !== undefined ? (team?.work?.rooms?.[room.id] ?? []) : []
   const running = doing !== undefined || roomWork.length > 0
   const doingBot = bot ?? (roomWork[0] !== undefined ? team?.bots?.find(b => b.id === roomWork[0].botId) : undefined)
-  const doingText = doing !== undefined ? workPhrase(doing) : roomWork[0] !== undefined ? `${doingBot?.name ?? ''} · ${workPhrase(roomWork[0])}` : ''
+  const doingText = doing !== undefined ? workPhrase(activeTool ? { ...doing, tool: activeTool.name, target: activeTool.text } : doing)
+    : roomWork[0] !== undefined ? `${doingBot?.name ?? ''} · ${workPhrase(roomWork[0])}` : ''
   const flat = team?.prefs?.layout === 'flat'
   const width = Math.min(100, Math.max(50, team?.prefs?.width ?? 80))
   const [chatWidth, setChatWidth] = useState(() => Math.max(0, Dimensions.get('window').width - 24))
@@ -316,33 +327,38 @@ export function ChatView({ bot, room, header, onMissing }: { bot?: Bot; room?: R
   }, [isFocused, hostId, id, bot !== undefined, room !== undefined, latestAt])
   // Back online after a drop or opening a chat: read what was missed and reconcile team pending state.
   useEffect(() => { refreshTeam?.() }, [refreshTeam, chatKey])
-  const wasOnline = useRef(online)
+  const active = online && isFocused
+  const wasActive = useRef(active)
   useEffect(() => {
-    if (online && !wasOnline.current) { void refresh(generation.current); refreshTeam?.() }
-    wasOnline.current = online
-  }, [online, refresh, refreshTeam])
+    if (active && !wasActive.current) { void refresh(generation.current); refreshTeam?.() }
+    wasActive.current = active
+  }, [active, refresh, refreshTeam])
   const hasChatPending = question !== undefined || team?.views?.[sessionId] !== undefined || approvals.length > 0 || secrets.length > 0 || browserHold !== undefined
+  const inlineTools = room === undefined && (page?.inlineTools === true || hello?.capabilities?.includes('chat-inline-tools') === true)
   useEffect(() => {
     if (onFeed === undefined) return
     const gen = generation.current
     return onFeed((event, data) => {
       if (generation.current !== gen) return
       if (event === 'room' && room !== undefined && data?.roomId === room.id) { void refresh(gen); if (hasChatPending) refreshTeam?.() }
+      if (event === 'chat-timeline' && inlineTools && focusedRef.current && data?.sessionId === sessionId) void refresh(gen)
       if (event === 'message' && data?.sessionId === sessionId) {
         const item = data.item
         if (item !== undefined) {
-          setPageState(prev => prev.key !== chatKey || prev.page === null || prev.page.items.some(it => it.seq !== undefined && it.seq === item.seq)
+          if (!inlineTools) setPageState(prev => prev.key !== chatKey || prev.page === null || prev.page.items.some(it => it.seq !== undefined && it.seq === item.seq)
             ? prev
             : { ...prev, page: { ...prev.page, items: [...prev.page.items, item] } })
           if (focusedRef.current && hostId !== '' && id !== '' && typeof item.time === 'number' && Number.isFinite(item.time) && item.time > 0) {
             void markSeen(hostId, id, item.time)
           }
         }
-        void refresh(gen)
+        // Settled assistant blocks share a seq. Their single snapshot also
+        // replaces the streamed rows, in order, without an optimistic echo.
+        if (!inlineTools || item?.kind !== 'bot') void refresh(gen)
         if (hasChatPending) refreshTeam?.()
       }
     })
-  }, [onFeed, room, sessionId, refresh, refreshTeam, hasChatPending, id, hostId])
+  }, [onFeed, room, sessionId, refresh, refreshTeam, hasChatPending, id, hostId, inlineTools])
   // Bubble caps in px — RN cannot parse CSS min(). Narrow phone screens ignore the
   // desktop's wide-window column slider so bubbles do not waste a third of the screen;
   // group rows reserve 30px (22px avatar + 8px gap) on the left.
@@ -398,7 +414,7 @@ export function ChatView({ bot, room, header, onMissing }: { bot?: Bot; room?: R
   }
 
   // Chronological rows (oldest first) with stable keys and the desktop's time stamps.
-  const items = useMemo(() => [...older, ...(page?.items ?? [])], [page, older])
+  const items = useMemo(() => joinChatItems(older, page?.items ?? []), [page, older])
   // A sent message leaves the outbox once the chat shows a new row with its text.
   useEffect(() => {
     if (pending.length === 0) return
@@ -422,12 +438,11 @@ export function ChatView({ bot, room, header, onMissing }: { bot?: Bot; room?: R
 
   const renderRow = useCallback<ListRenderItem<Row>>(({ item: row }) => {
     const { item } = row
-    const skey = item.kind === 'steps' ? row.key : row.key
     return (
       <ErrorBoundary inline>
         <Item stamp={row.stamp} author={inRoom && item.botId !== undefined ? botsById.get(item.botId) : undefined} admin={inRoom && item.botId !== undefined && item.botId === admin}
           item={item} p={p} flat={flat} maxWidth={item.kind === 'bot' || item.kind === 'post' ? botMax : userMax} inRoom={inRoom} sessionId={sessionId}
-          onLongPress={setMenuText} onOpenFile={openFile} onSaveFile={saveFile} onRetry={retry} open={openSteps[skey]} onToggle={toggleOf(skey)} />
+          onLongPress={setMenuText} onOpenFile={openFile} onSaveFile={saveFile} onRetry={retry} open={openSteps[row.key]} onToggle={toggleOf(row.key)} />
       </ErrorBoundary>
     )
   }, [inRoom, botsById, admin, p, flat, botMax, userMax, sessionId, openFile, retry, openSteps])
@@ -480,7 +495,7 @@ export function ChatView({ bot, room, header, onMissing }: { bot?: Bot; room?: R
                   if (y <= 80 && unreadBelow > 0) setUnreadBelow(0)
                 }}
                 scrollEventThrottle={100}
-                ListHeaderComponent={<Streaming key={sessionId} sessionId={sessionId} p={p} flat={flat} maxWidth={botMax} inRoom={inRoom} />}
+                ListHeaderComponent={inlineTools ? undefined : <Streaming key={sessionId} sessionId={sessionId} p={p} flat={flat} maxWidth={botMax} inRoom={inRoom} />}
                 ListFooterComponent={loadingOlder ? <ActivityIndicator style={{ marginVertical: 12 }} color={p.ink3} /> : undefined}
               />}
         {empty && !gone ? <EmptyChat bot={bot} room={room} bots={team?.bots ?? []} p={p} dark={dark} /> : null}

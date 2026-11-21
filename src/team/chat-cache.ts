@@ -9,6 +9,24 @@ export interface CachedChatEntry<P, I> {
   cursor: unknown
 }
 
+// A result on a later history page can refer to a call already on screen.
+// Its latest fields belong at the call's first position.
+export function joinChatItems<I extends { timelineId?: string }>(older: I[], latest: I[]): I[] {
+  if (!older.length) return latest
+  const joined: I[] = []
+  const positions = new Map<string, number>()
+  for (const row of [...older, ...latest]) {
+    const key = row.timelineId
+    const at = key === undefined ? undefined : positions.get(key)
+    if (at !== undefined) joined[at] = row
+    else {
+      if (key !== undefined) positions.set(key, joined.length)
+      joined.push(row)
+    }
+  }
+  return joined
+}
+
 export function createChatCache<P, I>(limit = 16) {
   const map = new Map<string, CachedChatEntry<P, I>>()
   return {

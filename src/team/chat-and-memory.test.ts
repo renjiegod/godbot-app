@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { createChatCache } from './chat-cache.ts'
+import { createChatCache, joinChatItems } from './chat-cache.ts'
 import { memorySummaryText } from './memory.ts'
+
+test('overlapping chat pages update the same tool at its first position', () => {
+  const before = { timelineId: 'text:before' }
+  const after = { timelineId: 'text:after' }
+  const running = { timelineId: 'tool:read', status: 'running' }
+  const done = { ...running, status: 'completed' }
+  assert.deepEqual(joinChatItems([before, running, after], [done]), [before, done, after])
+})
 
 test('chat cache ignores stale page writes whose ownerKey does not match the active chatKey', () => {
   const cache = createChatCache<{ sessionId: string; items: string[] }, string>(4)
