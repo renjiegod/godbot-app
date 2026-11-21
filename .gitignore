@@ -41,3 +41,8 @@ yarn-error.*
 
 # Firebase project config (set GODBOT_GOOGLE_SERVICES_JSON)
 google-services.json
+
+# Gradle output of local native modules
+modules/*/android/build/
+modules/*/android/.gradle/
+modules/*/android/.cxx/
