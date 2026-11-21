@@ -1,94 +1,93 @@
+<p align="center">
+  <img src="assets/icon.png" width="96" alt="Godbot app icon">
+</p>
+
 # Godbot for Android
 
-The Godbot phone app. It controls the Godbot team that runs in dsh on your computer; nothing runs on the phone. The connection is end-to-end encrypted (Noise IK) through a relay ([godbot-server](https://github.com/renjiegod/dsh-godbot/tree/main/src/link)), which only forwards ciphertext. The plan is in godbot-server's `IMPLEMENTATION_PLAN.md`, the wire protocol in its `docs/protocol.md`.
+Chat with your Bots, respond to approval requests, and manage your Godbot team from your phone. Your Bots and their tools run on the computer that hosts Godbot in dsh.
 
-Pair the app with your computer: in Godbot, open Settings → Phone, enter the relay address (`wss://<your relay>/v1/link`), turn phone access on and show the QR code. Scan it in the app, or open the `godbot://pair?…` link on the phone.
+**[Download the Android APK][releases]** · [Set up Godbot on your computer][desktop]
 
-This app is a fork of the DS Bot phone app (Apache-2.0, `5e9b7da`); see [NOTICE](NOTICE).
+## Install and pair
 
-## Layout
+1. Download `godbot-<version>.apk` from the latest [GitHub Release][releases]. Sign in with an account that has access to this repository. The APK supports Android 7.0 (API 24) or later on ARM phones (`arm64-v8a` and `armeabi-v7a`).
+2. Open the APK and allow installs from that source if Android prompts. If you have the older debug-signed test build, uninstall it first. Uninstalling clears the app's local settings and pairings.
+3. On your computer, open Godbot's **Settings → Phone**. Enter a relay address such as `wss://<your relay>/v1/link`, enable phone access, and show the pairing QR code.
+4. In the Android app, tap **Use the camera** to scan the QR code, or paste the pairing link. If you open a `godbot://pair?…` link from another app, check the computer and server shown before tapping **Pair**.
 
-| Path | What it is |
-|---|---|
-| `src/` | The app: connection, screens, team state, push, keep-alive, updates |
-| `godbot/` | Code copied from dsh-godbot by `scripts/sync-godbot.mjs`: the encrypted link (`link/`), themes, characters and the dictionary (`client/`), IM platforms and chunked downloads (`shared/`). Never edit it by hand |
-| `modules/godbot-native/` | Local Expo module (Kotlin): the foreground service for "Keep connected in background" (with its boot receiver and headless task), the battery-optimization and auto-start pages, file SHA-256 and the APK installer |
-| `plugins/` | Expo config plugins: release signing, the cleartext allow-list, optional Firebase |
-| `e2e/` | Emulator checks driven with adb and uiautomator: pairing and a chat (`android.mjs`), every page against a real Godbot (`pages.mjs`), an outdated computer (`incompatible.mjs`), "Keep connected in background" (`keepalive.mjs`), the demo build and the in-app update |
+Open a Bot from the team list and send a message. To pair or switch to another computer, use **Settings → Computers**. If the app asks for a Godbot upgrade, update the desktop plugin and reconnect.
 
-## Run
+## What you can do
 
-Needs Node 24, JDK 17 and the Android SDK (`ANDROID_HOME`). Expo Go is not supported: the app has its own native module.
+- **Continue a conversation.** Read replies, send messages and attachments, and follow individual Bots or group chats.
+- **Respond to your team.** Open **Needs you** to find questions and approvals that are waiting for you.
+- **Manage Godbot remotely.** Edit Bots and groups, review memory and schedules, and check team usage and settings.
+
+<p align="center">
+  <img src="docs/screenshots/team.png" width="240" alt="Godbot team list with Bots, group chats, and the Needs you inbox">
+  <img src="docs/screenshots/chat.png" width="240" alt="Godbot chat with an interactive release-readiness card">
+</p>
+
+<p align="center"><sub>Android screenshots from the built-in demo team.</sub></p>
+
+## Connection and updates
+
+Godbot on your computer and the Android app each make an outbound WebSocket connection to a relay server. The Noise IK handshake establishes end-to-end encryption. The relay forwards encrypted frames between the paired devices.
+
+Turn on **Settings → Keep connected in background** for an ongoing Android notification and a foreground service that reconnects when the link drops. If Android stops the service, use the **Battery optimization** and **Auto-start and lock** shortcuts in Settings. Encrypted Firebase push is available for deployments that configure Firebase on both the app and relay.
+
+Use **Settings → About Godbot → Check for app updates** to check the active computer's relay. The app reads `/app/latest.json`, verifies the downloaded APK's size and SHA-256, and opens the Android installer. For a manual download from GitHub, the matching `.apk.sha256` file can be checked with `sha256sum -c`.
+
+## Build from source
+
+Use Node.js 24, JDK 17, and the Android SDK with platform 36. Set `ANDROID_HOME` to the SDK path. Use a development build because Godbot includes a local Expo native module.
 
 ```sh
 npm ci
-npm run sync:godbot      # copy the shared code from ../dsh-godbot-wt/phone-link-push or GODBOT_SRC
 npm run typecheck
 npm test
-npx expo run:android     # build, install and start a debug build
+npm run android
 ```
 
-`EXPO_PUBLIC_GODBOT_DEMO=1` skips pairing and fills the app with a demo team. It is only active when the flag is set while the bundle is built.
+The shared link, UI definitions, and file-transfer code in `godbot/` are checked in. To refresh them, run `GODBOT_SRC=/path/to/dsh-godbot npm run sync:godbot` from a committed desktop checkout with the link sources. Run `npm run check:godbot` to check the copies. [`godbot/SOURCE.json`](godbot/SOURCE.json) records the source revision and file hashes.
 
-### Release build
+### Build a release APK
 
 ```sh
-npx expo prebuild -p android --clean
-cd android && ./gradlew assembleRelease
+npx expo prebuild --platform android --clean
+(cd android && ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a,armeabi-v7a)
 ```
 
-The release is signed with the keystore that `GODBOT_ANDROID_KEYSTORE`, `GODBOT_ANDROID_KEYSTORE_PASSWORD`, `GODBOT_ANDROID_KEY_ALIAS` and `GODBOT_ANDROID_KEY_PASSWORD` name, else with the debug key.
+The APK is written to `android/app/build/outputs/apk/release/app-release.apk`. Provide `GODBOT_ANDROID_KEYSTORE`, `GODBOT_ANDROID_KEYSTORE_PASSWORD`, `GODBOT_ANDROID_KEY_ALIAS`, and `GODBOT_ANDROID_KEY_PASSWORD` to use a release key. Local builds default to debug signing. Use the same release key for each distributed APK so Android can install updates in place.
 
-`EXPO_PUBLIC_GODBOT_DEMO` is not a Gradle input: after building a demo bundle, force a fresh one or the release keeps the demo team:
+Set `EXPO_PUBLIC_GODBOT_DEMO=1` at build time to open the built-in team without pairing. After a demo build, unset the flag and force Metro to regenerate the release bundle with `./gradlew :app:createBundleReleaseJsAndAssets --rerun assembleRelease` from `android/`.
 
-```sh
-./gradlew :app:createBundleReleaseJsAndAssets --rerun assembleRelease
-```
+For encrypted Firebase push, set `GODBOT_GOOGLE_SERVICES_JSON` to your project's `google-services.json` before running Expo prebuild and configure the matching service account on the relay. Long-press **Phone app** in **Settings → About Godbot** to trigger a local test of the encrypted notification.
 
-### Push
+### Tests and CI
 
-End-to-end encrypted push needs Firebase: point `GODBOT_GOOGLE_SERVICES_JSON` at your project's `google-services.json` before `expo prebuild`, and give godbot-server the matching service account. Without it the app builds and works; the computer just cannot reach it while the app is closed. "Keep connected in background" in Settings works without Firebase.
+The [CI workflow](.github/workflows/ci.yml) runs type checking and tests, checks the shared files against their recorded revision, and builds the APK and checksum as the `godbot-android` artifact. It can sign with a release key using the four signing secrets listed in the workflow, including `GODBOT_ANDROID_KEYSTORE_BASE64` for the keystore.
 
-How "Keep connected in background" holds up: the encrypted link lives outside React (`src/team/link-manager.ts`), so it survives the app being swiped away from Recents while the foreground service keeps the process. The service is sticky and starts again after a reboot or an app update if it was on, and brings the link back with no screen (a headless JS task, `src/team/keepalive-task.ts`). React Native runs no JS timers in the background, so the service sends a beat every 30 s and when the network or the screen comes back, and the link manager retries or drops a silent link by the clock. On phones from Xiaomi, Huawei, Honor, OPPO, vivo and others the person still has to let the app run: Settings shows "Battery optimization" and "Auto-start and lock" while the setting is on. A force stop in system settings, or a phone maker's cleaner when the app is not allowed to run, still ends it until the app is opened again: nothing reaches the phone while the app is not running (see FCM above).
+The GitHub release tag follows the version in `package.json`, for example `v0.1.1`. Publish the release-signed APK with a checksum calculated after signing.
 
-A long press on Settings → About → Phone app shows a test notification sealed and opened the same way as a real push.
+The [end-to-end scripts](e2e/) require `adb` and an Android emulator. Pairing tests accept `GODBOT_E2E_APK` to override the APK path.
 
-### Updates
+| Check | Run |
+| --- | --- |
+| Pair and send a message to a test computer | `GODBOT_E2E_PAIRING_URI='godbot://pair?…' npm run e2e:android` |
+| Exercise settings and chat against a real Godbot test harness | `GODBOT_E2E_CONTROL=http://127.0.0.1:47781 npm run e2e:pages` |
+| Check the upgrade prompt for an outdated computer | `npm run e2e:incompatible` |
+| Check the demo UI | `npm run e2e:demo -- /path/to/demo.apk` |
+| Test background reconnect and notifications | `GODBOT_RELAY_BIN=/path/to/godbot-relay node e2e/keepalive.mjs /path/to/app.apk` |
+| Test APK download, verification, and installation | `GODBOT_E2E_RELAY_BIN=/path/to/godbot-relay node e2e/update.mjs` |
 
-The app checks `https://<relay>/app/latest.json` on the relay of the active computer (Settings → About → Check for app updates), downloads the APK, verifies its size and SHA-256 and hands it to the system installer.
+For a local pairing test, start a relay and run `npm run e2e:fake-host -- ws://127.0.0.1:<port>/v1/link` to generate a pairing link and receive test messages. Set `GODBOT_E2E_RELAY_PORT` if the script needs to map the emulator's relay port with `adb reverse`. The desktop repository also provides the `PHONE-ANDROID` end-to-end case for the packaged Godbot plugin.
 
-## End-to-end check
+## License and credits
 
-```sh
-GODBOT_E2E_PAIRING_URI='godbot://pair?…' GODBOT_E2E_RELAY_PORT=8787 node e2e/android.mjs
-```
+Godbot for Android is licensed under the [Apache License 2.0](LICENSE) and is based on the [DS Bot phone app][ds-bot]. See [NOTICE](NOTICE) for upstream revisions and attribution. [DSH Go][dsh-go] served as a reference for this README.
 
-It installs the release APK on the running emulator, maps the relay port with `adb reverse`, opens the pairing link, confirms it, waits for the team list and sends a message.
-
-Without a Godbot computer, `e2e/fake-host.mjs` stands in for one: it runs the same `HostLink` Godbot bundles, with a one-Bot team, and prints a `PAIRING godbot://pair?…` line and every message it receives (`SENT …`). Start a relay (godbot-server's `godbot-relay` with `GODBOT_RELAY_PORT=0`), then:
-
-```sh
-node e2e/fake-host.mjs ws://127.0.0.1:<relay port>/v1/link
-```
-
-`node e2e/demo-check.mjs <demo apk>` checks a demo-mode build on the emulator: the main screens, the hidden test push, and the keep-alive service starting and stopping. Screenshots and UI dumps go to `e2e/artifacts/`.
-
-`GODBOT_E2E_RELAY_BIN=<godbot-relay> node e2e/update.mjs` checks the in-app update: it starts a relay that serves `/app/latest.json` and the APK, pairs with the stand-in computer, finds the newer version on About, downloads and verifies it, and confirms the system installer replaced the app.
-
-`GODBOT_E2E_CONTROL=http://127.0.0.1:47781 node e2e/pages.mjs` goes through every page against a real Godbot whose test harness serves a control endpoint (`GET /info`, `POST /pair`, `POST /channel`). It pairs through a fresh link, then on each page reads, writes, and asks the computer's team channel whether the write arrived: Bots, group chats, memory, schedules, the working folder, usage, the Bot browser, secrets, model providers, connectors, capabilities, updates, diagnostics and About. Gated writes ask for the screen lock, so the script sets the PIN 1234 for the run and clears it at the end. It never installs an update and never opens the computer's folder picker. Results go to `e2e/artifacts/pages-results.json`, one screenshot per page to `pages-<page>.png`.
-
-`node e2e/keepalive.mjs <apk>` checks "Keep connected in background" with a relay (`GODBOT_RELAY_BIN`, default: a godbot-server checkout next to this one, or next to a folder above it) and the stand-in computer, which raises approvals on demand (a `NOTICE <text>` line on its stdin). With the setting on, each approval must become a system notification: with the app in the background, after it is swiped away from Recents, after its process is killed (a notice raised meanwhile comes with the catch-up), and after a reboot. It also opens the battery-optimization and auto-start pages from Settings. It needs an emulator image without Google Play, to kill the process as root.
-
-`node e2e/incompatible.mjs` pairs with a stand-in computer whose Godbot is too old (`fake-host.mjs --incompatible`, `hello` answers `api: null`) and checks the upgrade hint and the growing delay between handshakes (2 s, 4 s, 8 s, 16 s).
-
-The scripts read the screen with `uiautomator dump`, which cannot read it while the on-screen keyboard is up (it waits for an idle screen that never comes). The helpers in `e2e/adb.mjs` close the keyboard before each read.
-
-The full check against a real Godbot (an isolated DSH Web, the packaged plugin and a relay) is dsh-godbot's `PHONE-ANDROID` case:
-
-```sh
-GODBOT_RELAY_BIN=<godbot-relay> GODBOT_ANDROID_E2E=$PWD npm --prefix <dsh-godbot> run test:e2e -- --case PHONE-ANDROID
-```
-
-## CI
-
-`.github/workflows/ci.yml` runs the typecheck and tests, checks `godbot/` against the dsh-godbot commit in `godbot/SOURCE.json` (skipped with a warning while it records uncommitted changes), and builds the release APK. Set the secrets `GODBOT_ANDROID_KEYSTORE_BASE64`, `GODBOT_ANDROID_KEYSTORE_PASSWORD`, `GODBOT_ANDROID_KEY_ALIAS` and `GODBOT_ANDROID_KEY_PASSWORD` to sign it with the release key; without them it is signed with the debug key.
+[releases]: https://github.com/renjiegod/godbot-app/releases/latest
+[desktop]: https://github.com/renjiegod/dsh-godbot#readme
+[ds-bot]: https://github.com/Fei2411/DS-Bot/tree/5e9b7da8882da3b68d8a0624342708c2150a9156/mobile
+[dsh-go]: https://github.com/ccch1mneyyy/dsh-Go
