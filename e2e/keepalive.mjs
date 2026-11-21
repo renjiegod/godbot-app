@@ -14,7 +14,7 @@
 //   node e2e/keepalive.mjs <apk>
 //
 //   GODBOT_RELAY_BIN   the godbot-relay binary (default: bin/godbot-relay of a godbot-server
-//                      checkout next to this one, or ~/code/godbot-server)
+//                      checkout next to this one, or next to a folder above it for a worktree)
 //   ANDROID_SERIAL     the emulator, when several devices are attached
 //
 // Needs an emulator image without Google Play: step 3 kills the app's process as root.
@@ -22,8 +22,8 @@ import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
-import { homedir, tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { adb, find, install, label, openUrl, PACKAGE, saveUi, screenSize, screenshot, scrollTo, shell, sleep, tap, waitFor } from './adb.mjs'
 
@@ -33,8 +33,16 @@ if (!apk || !existsSync(apk)) {
   console.error('Usage: node e2e/keepalive.mjs <apk>')
   process.exit(2)
 }
-const relayBin = process.env.GODBOT_RELAY_BIN
-  ?? [resolve(APP, '../godbot-server/bin/godbot-relay'), join(homedir(), 'code/godbot-server/bin/godbot-relay')].find(existsSync)
+// A godbot-server checkout next to this one, or next to a folder above it (a worktree kept
+// in its own folder tree).
+function siblingRelay() {
+  for (let dir = APP; dirname(dir) !== dir; dir = dirname(dir)) {
+    const candidate = join(dirname(dir), 'godbot-server', 'bin', 'godbot-relay')
+    if (existsSync(candidate)) return candidate
+  }
+  return undefined
+}
+const relayBin = process.env.GODBOT_RELAY_BIN ?? siblingRelay()
 if (!relayBin || !existsSync(relayBin)) {
   console.error('Set GODBOT_RELAY_BIN to a godbot-relay binary (cd godbot-server && go build -o bin/godbot-relay ./cmd/godbot-relay)')
   process.exit(2)
