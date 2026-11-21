@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Typecheck and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      # godbot/ is a copy of files from dsh-godbot at the commit SOURCE.json records.
+      - name: Check the synced Godbot files
+        run: |
+          dirty=$(node -p "require('./godbot/SOURCE.json').godbot.dirty === true")
+          commit=$(node -p "require('./godbot/SOURCE.json').godbot.commit")
+          if [ "$dirty" = "true" ]; then
+            echo "::warning::godbot/ was synced from uncommitted dsh-godbot changes; run npm run sync:godbot from a committed checkout"
+            exit 0
+          fi
+          git clone --quiet --filter=blob:none https://github.com/renjiegod/dsh-godbot.git "$RUNNER_TEMP/dsh-godbot"
+          git -C "$RUNNER_TEMP/dsh-godbot" checkout --quiet --detach "$commit"
+          GODBOT_SRC="$RUNNER_TEMP/dsh-godbot" npm run check:godbot
+
+  android:
+    name: Android release APK
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - run: npm ci
+      - run: npx expo prebuild --platform android --no-install
+      # Signed with the release key when the secrets exist; otherwise with the debug key.
+      - name: Release signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.GODBOT_ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.GODBOT_ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.GODBOT_ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.GODBOT_ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::notice::No signing secrets; the APK is signed with the debug key"
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/godbot-release.jks"
+          {
+            echo "GODBOT_ANDROID_KEYSTORE=$RUNNER_TEMP/godbot-release.jks"
+            echo "GODBOT_ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "GODBOT_ANDROID_KEY_ALIAS=$KEY_ALIAS"
+            echo "GODBOT_ANDROID_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+      - name: Build the release APK
+        working-directory: android
+        run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
+      - name: Checksum
+        run: |
+          version=$(node -p "require('./package.json').version")
+          mkdir -p dist
+          cp android/app/build/outputs/apk/release/app-release.apk "dist/godbot-$version.apk"
+          (cd dist && sha256sum "godbot-$version.apk" > "godbot-$version.apk.sha256")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: godbot-android
+          path: dist/
+          retention-days: 14
