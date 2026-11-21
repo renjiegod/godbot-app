@@ -305,7 +305,6 @@ const MOBILE_ZH: Record<string, string> = {
   'Server': '服务器',
   'Only pair with a computer you set up yourself.': '只和你自己设置的电脑配对。',
   "This Bot's browser runs in Godbot on the computer. Open it there to watch or take over.": '这个 Bot 的浏览器在电脑上的 Godbot 里运行，请在电脑上查看或接管。',
-  'Based on DS Bot': '基于 DS Bot',
   'To use another folder, pick it in Godbot on the computer.': '其他文件夹请在电脑上的 Godbot 里选择。',
   "{name}'s usage": '{name} 的用量',
   'No usage yet': '还没有用量',
