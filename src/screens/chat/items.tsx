@@ -12,6 +12,7 @@ import { inkColor, radius, type as typeScale, useTheme, type Palette } from '../
 import { Markdown, hasBlockContent } from './markdown.tsx'
 import { useTeam } from '../../team/context.tsx'
 import { ViewCard } from './view.tsx'
+import { ToolCard } from './tool-card.tsx'
 import { handoffTitleOf, relayReplyText, roundEventText, settledQuestionPicks, stripLongNote, type RelayReplyData, type SettledQuestionData } from './settled.ts'
 import { viewAnswerText } from 'deep-view/core'
 
@@ -23,7 +24,10 @@ export type { SettledQuestionData }
 
 export interface ChatItem {
   id?: string
-  kind: 'bot' | 'user' | 'event' | 'answer' | 'view' | 'divider' | 'steps' | 'closed' | 'post' | 'relay'
+  kind: 'bot' | 'user' | 'event' | 'answer' | 'view' | 'divider' | 'steps' | 'tool' | 'closed' | 'post' | 'relay'
+  timelineId?: string
+  toolId?: string
+  status?: string
   text?: string
   time?: number
   seq?: number
@@ -69,6 +73,7 @@ export interface ChatItem {
 export function keysOf(items: ChatItem[]): string[] {
   const seen = new Map<string, number>()
   return items.map(item => {
+    if (item.timelineId !== undefined) return item.timelineId
     const base = item.localId !== undefined ? `local-${item.localId}` : `${item.kind}-${item.seq ?? item.time ?? (item.kind === 'steps' ? `t${item.turn ?? ''}` : '')}`
     const count = seen.get(base) ?? 0
     seen.set(base, count + 1)
@@ -120,6 +125,7 @@ export const Item = memo(function Item({ item, p, flat, maxWidth, inRoom, sessio
     ? item.answers.map(answer => [...(answer.selected ?? []), ...(answer.custom ? [answer.custom] : [])].join(', ')).join('\n')
     : bodyJoined
   const longPress = () => { void Haptics.selectionAsync(); onLongPress?.(source) }
+  if (item.kind === 'tool') return <ToolCard item={item} p={p} open={open === true} onToggle={onToggle} />
   if (item.kind === 'steps') return <Steps item={item} p={p} open={open === true} onToggle={onToggle ?? (() => {})} />
   if (item.kind === 'divider') {
     const label = typeof item.time === 'number' ? clockLabel(item.time) : ''

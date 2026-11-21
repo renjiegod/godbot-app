@@ -49,8 +49,10 @@ export function dumpUi() {
     } catch { xml = '' /* the dump fails while the screen changes; try again */ }
   }
   const nodes = []
-  for (const match of xml.matchAll(/<node ([^>]*?)\/?>/g)) {
-    const attrs = Object.fromEntries([...match[1].matchAll(/([\w-]+)="([^"]*)"/g)].map(([, key, value]) => [key, decode(value)]))
+  // UIAutomator uses single-quoted attributes for text containing JSON quotes.
+  for (const match of xml.matchAll(/<node\s+((?:[^"'<>]|"[^"]*"|'[^']*')*)>/g)) {
+    const attrs = Object.fromEntries([...match[1].matchAll(/([\w-]+)=(?:"([^"]*)"|'([^']*)')/g)]
+      .map(([, key, double, single]) => [key, decode(double ?? single)]))
     const box = /\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]/.exec(attrs.bounds ?? '')
     if (box === null) continue
     const [x1, y1, x2, y2] = box.slice(1).map(Number)
