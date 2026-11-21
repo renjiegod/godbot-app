@@ -43,6 +43,7 @@ before(async () => {
           shortCircuit: true,
           source: `
             export const openLink = (...args) => globalThis.__syncTestHooks.openLink(...args)
+            export const relayFramesReceived = () => 0
             export const callBot = (...args) => globalThis.__syncTestHooks.callBot(...args)
             export const callBotState = (...args) => globalThis.__syncTestHooks.callBotState(...args)
           `,
@@ -370,6 +371,32 @@ test('useTeamLink keeps connection retry timer when initial handshake fails befo
   const reconnected = h.render()
   assert.equal(reconnected.online, true)
   assert.equal(reconnected.team?.revision, 1)
+})
+
+test('useTeamLink polls a new client while a read on the closed client is still pending', async (t) => {
+  let reads = 0
+  let finishOldRead!: (state: TeamState) => void
+  const h = mountUseTeamLink({
+    async onStateCall() {
+      reads += 1
+      if (reads === 1) return new Promise(resolve => { finishOldRead = resolve })
+      return { revision: 2, bots: [], questions: {} }
+    },
+  })
+  t.after(h.cleanup)
+  h.render()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(reads, 1)
+
+  h.dropLink()
+  h.appState('active')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(reads, 2)
+  assert.equal(h.render().team?.revision, 2)
+
+  finishOldRead({ revision: 10, bots: [], questions: {} })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(h.render().team?.revision, 2)
 })
 
 test('reconnectDelayMs retries at once on first drop after a live link, then backs off', () => {

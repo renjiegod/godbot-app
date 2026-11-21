@@ -127,6 +127,7 @@ test('switching to a computer with a lower revision clears the old team and acce
           shortCircuit: true,
           source: `
             export const openLink = globalThis.__linkTestHooks.openLink
+            export const relayFramesReceived = () => 0
             export const callBot = globalThis.__linkTestHooks.callBot
             export const callBotState = globalThis.__linkTestHooks.callBotState
           `,

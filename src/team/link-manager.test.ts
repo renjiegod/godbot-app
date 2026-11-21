@@ -9,7 +9,7 @@ const phone = { deviceId: 'd-phone', publicKey: 'pk', privateKey: 'sk', accessTo
 interface FakeClient {
   closed: boolean
   probes: (number | undefined)[]
-  bytes: number
+  frames: number
   connected: boolean
   emit(event: string, data?: unknown): void
   drop(): void
@@ -21,13 +21,13 @@ function fakeClient(): FakeClient & Record<string, any> {
   return {
     closed: false,
     probes: [],
-    bytes: 0,
+    frames: 0,
     connected: true,
     onEvent(fn: (message: { event: string; data: unknown }) => void) { events.push(fn); return () => {} },
     onClose(fn: () => void) { closes.push(fn); return () => {} },
     async close() { this.closed = true },
     probe(ms?: number) { this.probes.push(ms) },
-    getStats() { return { mode: 'Relay', connected: this.connected, bytesSent: 0, bytesReceived: this.bytes } },
+    getStats() { return { mode: 'Relay', connected: this.connected, bytesSent: 0, bytesReceived: 0 } },
     emit(event: string, data: unknown = {}) { for (const fn of events) fn({ event, data }) },
     drop() { for (const fn of closes) fn() },
   }
@@ -73,6 +73,7 @@ function setup(options: {
       clients.push(client)
       return client as any
     },
+    relayFramesReceived: client => (client as unknown as FakeClient).frames,
     async callBot(_client: unknown, endpoint: string, payload?: unknown) {
       calls.push({ endpoint, payload })
       if (endpoint === 'hello') return (options.hello?.() ?? { api: 1, capabilities: [], boot: 'boot-1', seq: 3, plugin: { name: 'dsh-godbot' } }) as any
@@ -134,6 +135,18 @@ test('a screen alone closes the link when it goes away', async (t) => {
   assert.equal(h.clients[0].closed, true)
 })
 
+test('an in-flight keep-alive restore does not replace the computer selected on screen', async (t) => {
+  pausedTimers(t)
+  const h = setup()
+  const release = h.manager.holdForScreen(B, phone)
+  h.manager.holdForKeepAlive(A, phone)
+  await settle()
+  release()
+  assert.deepEqual(h.opened, ['d-B'])
+  assert.equal(h.manager.snapshot().host, 'd-B')
+  assert.equal(h.clients[0].closed, false)
+})
+
 test('in the background a dropped link comes back on the beat, with no timer firing', async (t) => {
   const timers = pausedTimers(t)
   let fail = false
@@ -188,17 +201,17 @@ test('a silent link is probed, and dropped when the probe goes unanswered', asyn
   h.manager.holdForKeepAlive(A, phone)
   await settle()
   const first = h.clients[0]
-  first.bytes = 100
+  first.frames = 100
 
   h.manager.tick('beat')
   assert.deepEqual(first.probes, [], 'traffic since the last beat: nothing to do')
-  // The relay pings every 25 s; 30 s without a byte is worth a probe.
+  // The relay pings every 25 s; 30 s without a frame is worth a probe.
   h.advance(SILENT_PROBE_MS)
   h.manager.tick('beat')
   assert.equal(first.probes.length, 1)
 
   // An answer keeps the link.
-  first.bytes = 140
+  first.frames = 140
   h.advance(PROBE_ANSWER_MS)
   h.manager.tick('beat')
   assert.equal(first.closed, false)
@@ -215,13 +228,30 @@ test('a silent link is probed, and dropped when the probe goes unanswered', asyn
   assert.equal(h.manager.snapshot().client, h.clients[1])
 })
 
+test('relay heartbeats keep an idle link open without any encrypted application traffic', async (t) => {
+  pausedTimers(t)
+  const h = setup()
+  h.manager.holdForKeepAlive(A, phone)
+  await settle()
+  const first = h.clients[0]
+  for (let beat = 0; beat < 4; beat += 1) {
+    h.advance(SILENT_PROBE_MS)
+    first.frames += 1
+    h.manager.tick('beat')
+  }
+  assert.equal(first.getStats().bytesReceived, 0)
+  assert.deepEqual(first.probes, [])
+  assert.equal(first.closed, false)
+  assert.equal(h.manager.snapshot().client, first)
+})
+
 test('the network coming back or the screen turning on probes the link at once', async (t) => {
   pausedTimers(t)
   const h = setup()
   h.manager.holdForKeepAlive(A, phone)
   await settle()
   const client = h.clients[0]
-  client.bytes = 10
+  client.frames = 10
   h.manager.tick('network')
   assert.equal(client.probes.length, 1)
   // No answer by the follow-up beat: the socket died with the old network.
@@ -231,9 +261,9 @@ test('the network coming back or the screen turning on probes the link at once',
 
   await settle()
   const next = h.clients[1]
-  next.bytes = 5
+  next.frames = 5
   h.manager.tick('screen')
-  next.bytes = 9
+  next.frames = 9
   h.advance(PROBE_ANSWER_MS)
   h.manager.tick('beat')
   assert.equal(next.closed, false, 'an answered probe keeps the link')
@@ -267,6 +297,26 @@ test('an attempt that never settles is given up on the beat', async (t) => {
   await settle()
   assert.equal(stuck.closed, true)
   assert.equal(h.opened.length, 2)
+  assert.equal(h.manager.snapshot().online, true)
+})
+
+test('the beat also retries when the socket connects but the computer never answers hello', async (t) => {
+  pausedTimers(t)
+  let helloCalls = 0
+  const h = setup({
+    hello: () => ++helloCalls === 1 ? new Promise(() => {}) : { api: 1, capabilities: [], boot: 'boot-1', seq: 3, plugin: { name: 'dsh-godbot' } },
+  })
+  h.manager.holdForKeepAlive(A, phone)
+  await settle()
+  assert.equal(h.manager.snapshot().client, h.clients[0])
+  assert.equal(h.manager.snapshot().online, false)
+
+  h.clients[0].frames += 1
+  h.advance(CONNECT_STUCK_MS)
+  h.manager.tick('beat')
+  await settle()
+  assert.equal(h.clients[0].closed, true)
+  assert.equal(h.manager.snapshot().client, h.clients[1])
   assert.equal(h.manager.snapshot().online, true)
 })
 

@@ -141,9 +141,10 @@ function phoneName(): string {
 /** A card as the computer keeps it: `view` is the root node of the blueprint. */
 export interface ShownView { id?: string; title?: string; view?: unknown }
 
-// The relay socket under each open link, for the push registration (push-link.ts).
-const relays = new WeakMap<RpcClient, RelayTransport>()
-export const relayOf = (client: RpcClient): RelayTransport | undefined => relays.get(client)
+// The relay under each link, for push registration and background liveness checks.
+const relays = new WeakMap<RpcClient, { transport: RelayTransport; receivedFrames: () => number }>()
+export const relayOf = (client: RpcClient): RelayTransport | undefined => relays.get(client)?.transport
+export const relayFramesReceived = (client: RpcClient): number => relays.get(client)?.receivedFrames() ?? 0
 
 /**
  * Opens the encrypted link to the computer. The pairing code goes only with the first
@@ -151,6 +152,7 @@ export const relayOf = (client: RpcClient): RelayTransport | undefined => relays
  * attempt that never finishes (in the background no JS timer fires to time it out).
  */
 export async function openLink(computer: SavedComputer, identity: PhoneIdentity, pairingCode?: string, onClient?: (client: RpcClient) => void): Promise<RpcClient> {
+  let receivedFrames = 0
   const relay = new RelayTransport(computer.server, {
     deviceId: identity.deviceId,
     identityKey: identity.publicKey,
@@ -158,12 +160,18 @@ export async function openLink(computer: SavedComputer, identity: PhoneIdentity,
     targetDeviceId: computer.hostDeviceId,
     // Offer Godbot's push extension; it is used only when the relay supports it.
     push: true,
+    createSocket(url) {
+      const socket = new WebSocket(url)
+      // The transport's byte counter only tracks ciphertext. Heartbeats are control frames.
+      socket.addEventListener('message', () => { receivedFrames += 1 })
+      return socket
+    },
   })
   const secure = new SecureTransport(relay, identity, { deviceId: computer.hostDeviceId, identityKey: computer.hostKey }, {
     hello: { name: phoneName(), ...(pairingCode === undefined ? {} : { pairingCode }) },
   })
   const client = new RpcClient(secure)
-  relays.set(client, relay)
+  relays.set(client, { transport: relay, receivedFrames: () => receivedFrames })
   onClient?.(client)
   await client.connect()
   return client
