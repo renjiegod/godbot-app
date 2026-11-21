@@ -10,6 +10,8 @@ import { t } from '../ui/i18n.ts'
 import { linkManager } from './link.ts'
 import { ensureChannels } from './notify.ts'
 
+let keepAliveGeneration = 0
+
 export const keepAliveSupported = (): boolean => GodbotNative !== null
 
 export const keepAliveRunning = (): boolean => GodbotNative?.isKeepAliveRunning() ?? false
@@ -21,12 +23,15 @@ export async function keepAliveWanted(): Promise<boolean> {
 /** Starts or stops the service to match the setting. Runs while the app is on screen. */
 export async function syncKeepAlive(computerName?: string): Promise<boolean> {
   if (GodbotNative === null) return false
-  if (!(await keepAliveWanted())) {
-    linkManager.releaseKeepAlive()
-    if (GodbotNative.isKeepAliveRunning()) GodbotNative.stopKeepAlive()
+  const generation = keepAliveGeneration
+  const wanted = await keepAliveWanted()
+  if (generation !== keepAliveGeneration) return false
+  if (!wanted) {
+    pauseKeepAlive()
     return false
   }
   await ensureChannels().catch(() => {})
+  if (generation !== keepAliveGeneration) return false
   const text = computerName ? t('Connected to {name}', { name: computerName }) : t('Keeping the link to your computer open')
   // The service saves the wish and the two lines, so a reboot starts it again as it was.
   GodbotNative.startKeepAlive(t('Godbot is connected'), text)
@@ -40,8 +45,10 @@ export async function setKeepAlive(on: boolean, computerName?: string): Promise<
 
 /** No computer to keep a link to (the last one was forgotten): the service stops, the setting stays. */
 export function pauseKeepAlive(): void {
+  keepAliveGeneration += 1
   linkManager.releaseKeepAlive()
-  if (GodbotNative?.isKeepAliveRunning() === true) GodbotNative.stopKeepAlive()
+  // Always clear the native preference, even between a start request and the service running.
+  GodbotNative?.stopKeepAlive()
 }
 
 /**
@@ -51,13 +58,18 @@ export function pauseKeepAlive(): void {
 export async function holdKeepAliveLink(): Promise<boolean> {
   // The demo team has no computer behind it.
   if (process.env.EXPO_PUBLIC_GODBOT_DEMO === '1') return false
-  if (!(await keepAliveWanted())) {
-    linkManager.releaseKeepAlive()
-    if (GodbotNative?.isKeepAliveRunning() === true) GodbotNative.stopKeepAlive()
+  const generation = keepAliveGeneration
+  const wanted = await keepAliveWanted()
+  if (generation !== keepAliveGeneration) return false
+  if (!wanted) {
+    pauseKeepAlive()
     return false
   }
   const computer = await loadComputer()
+  if (generation !== keepAliveGeneration) return false
   if (computer === undefined) { pauseKeepAlive(); return false }
-  linkManager.holdForKeepAlive(computer, await loadIdentity())
+  const identity = await loadIdentity()
+  if (generation !== keepAliveGeneration) return false
+  linkManager.holdForKeepAlive(computer, identity)
   return true
 }

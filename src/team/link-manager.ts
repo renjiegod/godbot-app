@@ -53,6 +53,8 @@ export interface LinkSnapshot {
 export interface LinkDeps {
   /** Opens the link; `onClient` gets it before the handshake, so a stuck attempt can be closed. */
   openLink(computer: SavedComputer, identity: PhoneIdentity, onClient: (client: RpcClient) => void): Promise<RpcClient>
+  /** All incoming WebSocket messages, including the relay's heartbeat control frames. */
+  relayFramesReceived(client: RpcClient): number
   callBot<T>(client: RpcClient, endpoint: string, payload?: unknown): Promise<T>
   /** Hands the computer the push key and registers with the relay (push-link.ts). */
   setupPush(client: RpcClient, hostDeviceId: string): Promise<unknown>
@@ -126,7 +128,7 @@ export function createLinkManager(deps: LinkDeps) {
   let incompatible = false
   let nextAt = 0
   let timer: ReturnType<typeof setTimeout> | undefined
-  let heard = { bytes: -1, at: 0 }
+  let heard = { frames: -1, at: 0 }
   let probedAt = 0
   let cursor = createNoticeCursor()
 
@@ -170,7 +172,7 @@ export function createLinkManager(deps: LinkDeps) {
       const client = await deps.openLink(computer, identity, created => { mine.client = created })
       if (!current()) { void client.close(); return }
       mine.client = client
-      heard = { bytes: -1, at: deps.now() }
+      heard = { frames: deps.relayFramesReceived(client), at: deps.now() }
       probedAt = 0
       // The screens read the team now, alongside the handshake: each is a round trip.
       set({ client, online: false, error: null })
@@ -242,7 +244,7 @@ export function createLinkManager(deps: LinkDeps) {
     failStreak = 0
     incompatible = false
     nextAt = 0
-    heard = { bytes: -1, at: 0 }
+    heard = { frames: -1, at: 0 }
     probedAt = 0
     cursor = createNoticeCursor()
     set({ client: undefined, online: false, hello: null, error: null, fatal: false })
@@ -269,12 +271,13 @@ export function createLinkManager(deps: LinkDeps) {
   }
 
   function checkAlive(client: RpcClient, now: number, urgent: boolean): void {
-    let stats: { connected: boolean; bytesReceived: number } | undefined
+    let stats: { connected: boolean } | undefined
     try { stats = client.getStats?.() } catch { return }
     if (stats === undefined) return
     if (!stats.connected) { drop(client); return }
-    if (stats.bytesReceived !== heard.bytes) {
-      heard = { bytes: stats.bytesReceived, at: now }
+    const frames = deps.relayFramesReceived(client)
+    if (frames !== heard.frames) {
+      heard = { frames, at: now }
       probedAt = 0
       if (!urgent) return
     } else if (probedAt !== 0) {
@@ -316,7 +319,8 @@ export function createLinkManager(deps: LinkDeps) {
     },
     /** "Keep connected in background" wants the link, until releaseKeepAlive(). */
     holdForKeepAlive(computer: SavedComputer, identity: PhoneIdentity): void {
-      setTarget(computer, identity)
+      // The screen may have selected a different computer while the task read storage.
+      if (screens === 0) setTarget(computer, identity)
       keep = true
       void connect()
     },
@@ -365,16 +369,15 @@ export function createLinkManager(deps: LinkDeps) {
       if (!wanted()) return
       const now = deps.now()
       const urgent = reason === 'network' || reason === 'screen'
-      const client = snap.client
-      if (client !== undefined) {
-        checkAlive(client, now, urgent)
-        return
-      }
       if (attempt !== null) {
         if (now - attempt.at < CONNECT_STUCK_MS) return
         const stuck = attempt
         attempt = null
+        if (snap.client !== undefined) set({ client: undefined, online: false })
         void stuck.client?.close()
+      } else if (snap.client !== undefined) {
+        checkAlive(snap.client, now, urgent)
+        return
       } else if (!urgent && reason !== 'start' && now < nextAt) {
         return
       }
