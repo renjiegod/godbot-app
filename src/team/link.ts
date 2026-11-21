@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AppState } from 'react-native'
 import type { RpcClient } from '../../godbot/link/index.ts'
-import { callBot, callBotState, openLink, type TeamState } from '../connection.ts'
+import { callBot, callBotState, openLink, relayFramesReceived, type TeamState } from '../connection.ts'
 import { ensureUnlock } from './gate.ts'
 import type { Hello } from './hello.ts'
 import { createLinkManager, errorText, LINK_REFRESH, offline, type FeedHandler, type LinkSnapshot } from './link-manager.ts'
@@ -18,6 +18,7 @@ export type { FeedHandler, Hello }
 /** The app's one link to the active computer (link-manager.ts), shared by the screens and the keep-alive service. */
 export const linkManager = createLinkManager({
   openLink: (computer, identity, onClient) => openLink(computer, identity, undefined, onClient),
+  relayFramesReceived,
   callBot: (client, endpoint, payload) => callBot(client, endpoint, payload),
   setupPush: setupPushFor,
   appState: () => AppState.currentState,
@@ -171,15 +172,16 @@ export function useTeamLink(computer: SavedComputer, identity: PhoneIdentity) {
     setPollError(null)
     setHello(null)
     const later = (run: () => void, ms: number) => { clearTimeout(timer); if (!stopped) timer = setTimeout(run, ms) }
-    // One read at a time: a burst of feed events while a Bot works becomes one
+    // One read at a time per client: a burst of feed events while a Bot works becomes one
     // read now and at most one more after it, not a pile of reads over a slow link.
-    let reading = false
+    let reading: RpcClient | undefined
     let again = false
     const poll = async () => {
       const client = clientRef.current
       if (stopped || client === undefined) return
-      if (reading) { again = true; return }
-      reading = true
+      if (reading === client) { again = true; return }
+      reading = client
+      again = false
       try {
         const next = await callBot<TeamState>(client, 'state', { since: revision.current, avatars: 'ref', live: liveKey.current })
         if (stopped || clientRef.current !== client) return
@@ -188,12 +190,12 @@ export function useTeamLink(computer: SavedComputer, identity: PhoneIdentity) {
       } catch (failure) {
         if (!stopped && clientRef.current === client) setPollError(errorText(failure))
       } finally {
-        reading = false
-        if (!stopped && clientRef.current === client) {
-          if (again) { again = false; void poll() }
-          else later(() => void poll(), POLL_MS)
-        } else {
-          again = false
+        if (reading === client) {
+          reading = undefined
+          if (!stopped && clientRef.current === client) {
+            if (again) void poll()
+            else later(() => void poll(), POLL_MS)
+          }
         }
       }
     }

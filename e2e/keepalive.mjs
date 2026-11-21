@@ -188,6 +188,14 @@ async function main() {
     await until(() => notified(`recents ${marker}`), 'the notification after the swipe', { timeout: 30_000 })
     ok('2. swiped from Recents: no screen, same process, notified', `pid ${before}`)
 
+    // With no UI polling and no notices, only the relay's heartbeats arrive.
+    const idleSince = Date.now()
+    await sleep(100_000)
+    if (host.line('HELLO ', idleSince)) throw new Error('The idle link reconnected despite relay heartbeats')
+    host.child.stdin.write(`NOTICE idle ${marker}\n`)
+    await until(() => notified(`idle ${marker}`), 'the notification after an idle period', { timeout: 30_000 })
+    ok('idle for 100 seconds: same link, notified')
+
     // 3. The process is killed (as the low-memory killer or a phone maker's cleaner does). The
     // service is sticky; with battery optimization on, Android may refuse to bring it back to
     // the foreground. A notice raised meanwhile must arrive with the catch-up.
