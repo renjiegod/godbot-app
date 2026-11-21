@@ -7,9 +7,10 @@ export interface NoticeCursorAnswer {
   notices?: unknown[]
 }
 
-export function createNoticeCursor() {
-  let boot: string | null = null
-  let seq = 0
+/** `from` resumes a cursor saved earlier, so a restarted process still catches up on what it missed. */
+export function createNoticeCursor(from?: { boot: string | null; seq: number } | null) {
+  let boot: string | null = typeof from?.boot === 'string' && from.boot !== '' ? from.boot : null
+  let seq = boot !== null && typeof from?.seq === 'number' && Number.isFinite(from.seq) ? from.seq : 0
 
   function connect(hello: { boot: string; seq: number }): { sameBoot: boolean; since: number } {
     const sameBoot = boot !== null && boot === hello.boot

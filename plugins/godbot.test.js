@@ -30,7 +30,7 @@ test('the app is Godbot for Android only, with the permissions its features need
   assert.equal(expo.scheme, 'godbot')
   assert.equal(expo.android.package, 'io.github.renjiegod.godbot')
   assert.equal(expo.ios, undefined)
-  for (const permission of ['POST_NOTIFICATIONS', 'FOREGROUND_SERVICE', 'FOREGROUND_SERVICE_SPECIAL_USE', 'REQUEST_INSTALL_PACKAGES']) {
+  for (const permission of ['POST_NOTIFICATIONS', 'FOREGROUND_SERVICE', 'FOREGROUND_SERVICE_SPECIAL_USE', 'REQUEST_INSTALL_PACKAGES', 'RECEIVE_BOOT_COMPLETED', 'ACCESS_NETWORK_STATE', 'REQUEST_IGNORE_BATTERY_OPTIMIZATIONS']) {
     assert.ok(expo.android.permissions.includes(`android.permission.${permission}`), permission)
   }
   for (const plugin of ['./plugins/network-security.js', './plugins/fcm.js', './plugins/android-release-signing.js']) {

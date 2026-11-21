@@ -4,18 +4,30 @@ import { AppState } from 'react-native'
 import type { RpcClient } from '../../godbot/link/index.ts'
 import { callBot, callBotState, openLink, type TeamState } from '../connection.ts'
 import { ensureUnlock } from './gate.ts'
-import { checkHello, helloRequest, type Hello, type HelloVerdict } from './hello.ts'
-import { createNoticeCursor, type NoticeCursorAnswer } from './notices.ts'
+import type { Hello } from './hello.ts'
+import { createLinkManager, errorText, LINK_REFRESH, offline, type FeedHandler, type LinkSnapshot } from './link-manager.ts'
+import { loadNoticeCursor, saveNoticeCursor } from './notice-cursor-store.ts'
 import { OPTIMISTIC, optimistic, withWrites, type Write } from './optimistic.ts'
 import { setupPushFor } from './push-link.ts'
-import { hostText, t } from '../ui/i18n.ts'
+import { hostText } from '../ui/i18n.ts'
 import type { PhoneIdentity, SavedComputer } from '../store.ts'
+
+export { errorText, helloError, offline, reconnectDelayMs, rejected } from './link-manager.ts'
+export type { FeedHandler, Hello }
+
+/** The app's one link to the active computer (link-manager.ts), shared by the screens and the keep-alive service. */
+export const linkManager = createLinkManager({
+  openLink: (computer, identity, onClient) => openLink(computer, identity, undefined, onClient),
+  callBot: (client, endpoint, payload) => callBot(client, endpoint, payload),
+  setupPush: setupPushFor,
+  appState: () => AppState.currentState,
+  now: () => Date.now(),
+  loadCursor: loadNoticeCursor,
+  saveCursor: saveNoticeCursor,
+})
 
 // Feed events keep the app live; the poll only stays as a foreground fallback.
 const POLL_MS = 15_000
-const RETRY_MS = 2_000
-// A computer whose Godbot this app cannot talk to is asked again less and less often.
-const INCOMPATIBLE_MAX_MS = 5 * 60_000
 // Writes that settle pending items without always bumping state.revision.
 const PENDING_MUTATING = new Set([
   'approval-answer',
@@ -36,45 +48,26 @@ const PENDING_MUTATING = new Set([
 const photoCache = new Map<string, string>()
 const photoFetching = new Set<string>()
 
-export type { Hello }
-export type FeedHandler = (event: string, data: any) => void
-
-export function rejected(error: unknown): boolean {
-  const code = (error as { code?: unknown })?.code
-  return code === 'NOT_PAIRED' || code === 'PAIRING_REJECTED'
-}
-
-export function reconnectDelayMs(hadLink: boolean, failStreak: number, incompatible = false): number {
-  if (incompatible) return Math.min(RETRY_MS * 2 ** Math.min(failStreak, 16), INCOMPATIBLE_MAX_MS)
-  return hadLink && failStreak === 0 ? 0 : RETRY_MS
-}
-
-/** What to tell the person when the computer's answer to `hello` rules this app out. */
-export function helloError(verdict: Exclude<HelloVerdict, { ok: true }>): string {
-  if (verdict.reason === 'not-godbot') return t('This computer runs {name}, not Godbot. Pair with a computer that runs Godbot.', { name: verdict.name })
-  if (verdict.reason === 'update-app') return t('Update this app to use it with the Godbot on this computer.')
-  return t('Update Godbot on the computer to use this phone.')
-}
-
-// Keeps the link up and the team state fresh. `call` runs one /api/bot endpoint.
+// Holds the link while the screens are up and keeps the team state fresh. `call` runs one
+// /api/bot endpoint. The link itself belongs to linkManager, so it outlives these screens when
+// "Keep connected in background" is on.
 export function useTeamLink(computer: SavedComputer, identity: PhoneIdentity) {
   const [team, setTeam] = useState<TeamState | null>(null)
   const [online, setOnline] = useState(false)
   // The encrypted link is up (calls can go), before the handshake says the computer is current.
   const [linked, setLinked] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [linkError, setLinkError] = useState<string | null>(null)
+  const [pollError, setPollError] = useState<string | null>(null)
   const [hello, setHello] = useState<Hello | null>(null)
   const clientRef = useRef<RpcClient | undefined>(undefined)
   const revision = useRef<number>(-1)
   const writes = useRef<Write[]>([])
   const liveKey = useRef<string | undefined>(undefined)
   const pollRef = useRef<() => void>(() => {})
-  const feedHandlers = useRef(new Set<FeedHandler>())
   const hostRef = useRef(computer.hostDeviceId)
   const switched = hostRef.current !== computer.hostDeviceId
   if (switched) {
     hostRef.current = computer.hostDeviceId
-    void clientRef.current?.close()
     clientRef.current = undefined
     revision.current = -1
     writes.current = []
@@ -82,13 +75,11 @@ export function useTeamLink(computer: SavedComputer, identity: PhoneIdentity) {
     setTeam(null)
     setOnline(false)
     setLinked(false)
-    setError(null)
+    setLinkError(null)
+    setPollError(null)
     setHello(null)
   }
-  const onFeed = useCallback((handler: FeedHandler) => {
-    feedHandlers.current.add(handler)
-    return () => { feedHandlers.current.delete(handler) }
-  }, [])
+  const onFeed = useCallback((handler: FeedHandler) => linkManager.onFeed(handler), [])
 
   function fetchPhoto(botId: string, ref: string) {
     if (photoFetching.has(ref)) return
@@ -168,28 +159,18 @@ export function useTeamLink(computer: SavedComputer, identity: PhoneIdentity) {
 
   useEffect(() => {
     let stopped = false
-    let connecting = false
-    let hadLink = false
-    let failStreak = 0
-    let incompatible = false
-    let activeClient: RpcClient | undefined
     let timer: ReturnType<typeof setTimeout> | undefined
     revision.current = -1
     writes.current = []
     liveKey.current = undefined
-    const noticeCursor = createNoticeCursor()
+    clientRef.current = undefined
     setTeam(null)
     setOnline(false)
     setLinked(false)
-    setError(null)
+    setLinkError(null)
+    setPollError(null)
     setHello(null)
-    // One pending timer: every feed event polls, and each poll would otherwise start another loop.
     const later = (run: () => void, ms: number) => { clearTimeout(timer); if (!stopped) timer = setTimeout(run, ms) }
-    const scheduleReconnect = () => {
-      const delay = reconnectDelayMs(hadLink, failStreak, incompatible)
-      failStreak += 1
-      later(() => void connect(), delay)
-    }
     // One read at a time: a burst of feed events while a Bot works becomes one
     // read now and at most one more after it, not a pile of reads over a slow link.
     let reading = false
@@ -203,9 +184,9 @@ export function useTeamLink(computer: SavedComputer, identity: PhoneIdentity) {
         const next = await callBot<TeamState>(client, 'state', { since: revision.current, avatars: 'ref', live: liveKey.current })
         if (stopped || clientRef.current !== client) return
         apply(next)
-        setError(null)
+        setPollError(null)
       } catch (failure) {
-        if (!stopped && clientRef.current === client) setError(errorText(failure))
+        if (!stopped && clientRef.current === client) setPollError(errorText(failure))
       } finally {
         reading = false
         if (!stopped && clientRef.current === client) {
@@ -217,100 +198,45 @@ export function useTeamLink(computer: SavedComputer, identity: PhoneIdentity) {
       }
     }
     pollRef.current = () => void poll()
-    const connect = async () => {
-      if (stopped || connecting || clientRef.current !== undefined) return
-      connecting = true
-      try {
-        const client = await openLink(computer, identity)
-        if (stopped) { void client.close(); return }
-        activeClient = client
-        clientRef.current = client
-        setLinked(true)
-        // The handshake: the phone names the API versions it speaks, and the computer
-        // answers with the one both speak (null when there is none) and its plugin. The
-        // team read goes out with it, not after it: each is a round trip through the relay.
-        void poll()
-        const helloResult = await callBot<Hello>(client, 'hello', helloRequest()).catch(() => null)
-        if (stopped) { void client.close(); return }
-        const verdict = checkHello(helloResult)
-        if (!verdict.ok || helloResult === null) {
-          if (activeClient === client) activeClient = undefined
-          if (clientRef.current === client) clientRef.current = undefined
-          setError(helloError(verdict.ok ? { ok: false, reason: 'update-godbot' } : verdict))
-          setLinked(false)
-          void client.close()
-          connecting = false
-          // DS Bot on the other end will not turn into Godbot by retrying.
-          if (!verdict.ok && verdict.reason === 'not-godbot') { setTeam(null); return }
-          incompatible = true
-          scheduleReconnect()
-          return
-        }
-        hadLink = true
-        incompatible = false
-        failStreak = 0
-        setHello(helloResult)
-        setOnline(true)
-        setError(null)
-        // Push: hand this computer the phone's key and tell the relay where to push.
-        void setupPushFor(client, computer.hostDeviceId).catch(() => {})
-        const { sameBoot, since } = noticeCursor.connect(helloResult)
-        client.onEvent(({ event, data }: { event: string; data: any }) => {
-          if (stopped || clientRef.current !== client) return
-          if (event === 'notice' && !noticeCursor.acceptLive(helloResult.boot, data)) return
-          if (event === 'revision' || event === 'live') void poll()
-          for (const handler of feedHandlers.current) handler(event, data)
-        })
-        void callBot(client, 'notices', { boot: helloResult.boot, since }).then(answer => {
-          if (stopped || clientRef.current !== client) return
-          const { reset, replay } = noticeCursor.acceptCatchUp(helloResult.boot, sameBoot, answer as NoticeCursorAnswer)
-          if (reset) void poll()
-          else {
-            if (replay.length > 0) void poll()
-            for (const entry of replay) {
-              for (const handler of feedHandlers.current) handler('notice', entry)
-            }
-          }
-        }).catch(() => {})
-        client.onClose(() => {
-          if (stopped || clientRef.current !== client) return
-          activeClient = undefined
-          clientRef.current = undefined
-          setOnline(false)
-          setLinked(false)
-          clearTimeout(timer)
-          scheduleReconnect()
-        })
-      } catch (failure) {
-        if (stopped) return
-        setError(errorText(failure))
-        if (rejected(failure)) setTeam(null)
-        else { connecting = false; scheduleReconnect() }
-      } finally {
-        connecting = false
+    // The manager's state, as the screens show it. A new link reads the team at once.
+    const sync = (snap: LinkSnapshot) => {
+      if (stopped || snap.host !== computer.hostDeviceId) return
+      if (snap.client !== clientRef.current) {
+        clientRef.current = snap.client
+        clearTimeout(timer)
+        if (snap.client !== undefined) void poll()
       }
+      setLinked(snap.client !== undefined)
+      setOnline(snap.online)
+      setHello(snap.hello)
+      setLinkError(snap.error)
+      if (snap.fatal) setTeam(null)
     }
-    void connect()
+    const unsubscribe = linkManager.subscribe(sync)
+    const offFeed = linkManager.onFeed(event => {
+      if (event === 'revision' || event === 'live' || event === LINK_REFRESH) void poll()
+    })
+    const release = linkManager.holdForScreen(computer, identity)
+    // With "Keep connected in background" the link may already be up.
+    sync(linkManager.snapshot())
     const foreground = AppState.addEventListener('change', status => {
-      if (status !== 'active') { clearTimeout(timer); return }
-      failStreak = 0
-      const client = clientRef.current
-      if (client === undefined) { clearTimeout(timer); void connect(); return }
-      // Waking is the common half-open case: probe quickly so a dead socket
-      // declares itself instead of letting the poll hang.
-      client.probe(2_500)
-      void poll()
+      if (status !== 'active') { clearTimeout(timer); linkManager.background(); return }
+      linkManager.foreground()
+      if (clientRef.current !== undefined) void poll()
     })
     return () => {
       stopped = true
       clearTimeout(timer)
       foreground.remove()
-      void activeClient?.close()
-      if (clientRef.current === activeClient) clientRef.current = undefined
+      offFeed()
+      unsubscribe()
+      release()
+      clientRef.current = undefined
     }
   }, [computer, identity, apply])
 
   const refresh = useCallback(() => pollRef.current(), [])
+  const error = linkError ?? pollError
 
   return {
     team: switched ? null : team,
@@ -324,16 +250,6 @@ export function useTeamLink(computer: SavedComputer, identity: PhoneIdentity) {
     onFeed,
   }
 }
-
-export function errorText(error: unknown): string {
-  const code = (error as { code?: unknown })?.code
-  if (rejected(error)) return t('The computer did not accept this phone. Show a new QR code on the computer and scan it again.')
-  if (code === 'HOST_OFFLINE') return t('The computer is not connected to the Server. Check that Godbot is open and phone access is on.')
-  if (code === 'SERVER_UNREACHABLE') return t('Could not reach the Server. Check the network. If the computer\'s Server address changed, pair again under Computers.')
-  return hostText(error instanceof Error ? error.message : String(error))
-}
-
-export const offline = () => Object.assign(new Error(t('Not connected to the computer yet.')), { code: 'link/offline' })
 
 // Host errors mostly arrive in the plugin's English and are translated when the app knows
 // them; the rest (Godbot writes some in Chinese) are shown exactly as they came.

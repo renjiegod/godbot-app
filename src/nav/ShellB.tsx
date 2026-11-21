@@ -2,10 +2,9 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack'
 import { useNavigation, type NavigationProp, type ParamListBase } from '@react-navigation/native'
 import { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, AppState, Dimensions, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
+import { ActivityIndicator, Dimensions, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
 import * as Notifications from 'expo-notifications'
-import { showLocal } from '../team/notify.ts'
-import { noticeContent, targetOf } from '../team/push-payload.ts'
+import { targetOf } from '../team/push-payload.ts'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as SecureStore from 'expo-secure-store'
 import { onPrefsChange, readPrefs } from '../store.ts'
@@ -289,22 +288,13 @@ function NoticeBanner() {
   )
 }
 
-// Godbot: while the app is in the background (the link stays up for a while, and for good
-// with "Keep connected in background"), a notice becomes a system notification. A tap on
-// one, or on a pushed one, opens its chat.
+// Godbot: a notice that arrives while the app is not on screen becomes a system notification
+// (team/keepalive-task.ts, also with no screen at all). A tap on one, or on a pushed one,
+// opens its chat.
 function BackgroundNotices() {
-  const { onFeed, computer } = useTeam()
+  const { computer } = useTeam()
   const navigation = useNavigation<NavigationProp<ParamListBase>>()
   const host = computer?.hostDeviceId
-  useEffect(() => {
-    if (onFeed === undefined) return
-    return onFeed((event, data) => {
-      if (event !== 'notice' || AppState.currentState === 'active') return
-      const content = noticeContent(data ?? {}, { finished: t('Finished'), newReply: t('New reply'), approval: t('Approval needed'), question: t('Has a question') })
-      if (content === null) return
-      void showLocal({ ...content, data: { ...content.data, ...(host !== undefined ? { host } : {}) } }).catch(() => {})
-    })
-  }, [onFeed, host])
   const last = Notifications.useLastNotificationResponse()
   const handled = useRef<string | null>(null)
   useEffect(() => {
