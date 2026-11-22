@@ -1,6 +1,6 @@
 /**
  * One connector as the computer lists it (ds-bot/src/host/connectors/index.js `rowFor`). The
- * phone reads only these fields; the row carries more (category, auth, tools, offFor…).
+ * phone reads only these fields; the row carries more (category, tools…).
  * `account` is null until someone signs in, and `error` exists only after a failure.
  */
 export interface ConnectorAuth {
@@ -25,6 +25,7 @@ export interface ConnectorRow {
   tools?: number
   custom?: unknown
   readOnly?: boolean
+  offFor?: string[]
   auth?: ConnectorAuth
   pending?: ConnectorPending
 }
@@ -33,7 +34,7 @@ export interface ConnectorRow {
  * What the computer's `state` answer carries under `connectors`: the rows and, beside them,
  * the mailbox. It is an object, not the list itself.
  */
-export interface ConnectorsView { connectors?: ConnectorRow[]; mail?: { accounts?: unknown[]; google?: boolean } }
+export interface ConnectorsView { connectors?: ConnectorRow[]; mail?: { accounts?: unknown[]; google?: boolean; offFor?: string[] } }
 
 export type ConnectorConnectAction = 'connect-now' | 'oauth-signin' | 'key-form' | 'token-form'
 

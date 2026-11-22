@@ -188,7 +188,7 @@ test('switching to a computer with a lower revision clears the old team and acce
     callBot: async (client: { host: string }, endpoint: string, payload: unknown) => {
       sent.push({ host: client.host, endpoint, payload })
       if (endpoint === 'state') return byHost[client.host]
-      if (endpoint === 'hello') return { api: 1, capabilities: [], boot: `boot-${client.host}`, seq: 0 }
+      if (endpoint === 'hello') return { api: 1, capabilities: [], boot: `boot-${client.host}`, seq: 0, plugin: { name: 'dsh-godbot' } }
       if (endpoint === 'notices') return { reset: false }
       return {}
     },

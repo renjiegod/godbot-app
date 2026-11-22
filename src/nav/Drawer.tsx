@@ -6,7 +6,7 @@ import { ErrorBoundary } from '../ui/error-boundary.tsx'
 import { SPRING_SHAPE } from '../ui/tokens.ts'
 import { t } from '../ui/i18n.ts'
 
-const DrawerCtx = createContext({ open: () => {}, close: () => {} })
+const DrawerCtx = createContext({ open: () => {}, close: () => {}, shown: false })
 export const useDrawer = () => useContext(DrawerCtx)
 
 // The desktop sidebar as a left drawer: edge pan or the header button opens it,
@@ -64,7 +64,7 @@ export function Drawer({ width, edgeWidth = 24, edgeEnabled = true, content, chi
 
   const scrimStyle = useAnimatedStyle(() => ({ opacity: (x.value + width) / width }))
   const panelStyle = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }] }))
-  const ctxValue = useMemo(() => ({ open, close }), [open, close])
+  const ctxValue = useMemo(() => ({ open, close, shown }), [open, close, shown])
 
   return (
     <DrawerCtx.Provider value={ctxValue}>

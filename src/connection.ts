@@ -18,6 +18,9 @@ export interface Bot {
   avatar?: { shape?: string; image?: string; imageRef?: string }
   model?: string
   appliedModel?: string
+  engine?: string
+  accountProfileId?: string
+  sandboxKind?: string
   capabilities?: string[]
   browser?: boolean
   effort?: string
@@ -27,9 +30,12 @@ export interface Bot {
   instructions?: string
   sessionId?: string
   parts?: string[]
+  partOrder?: string[]
+  openParts?: { sessionId: string; startedAt?: number; parts?: string[] }[]
   waiting?: boolean
   pinned?: boolean
   hidden?: boolean
+  sectionId?: string
   createdAt?: number
   lastAt?: number
   preview?: string
@@ -48,6 +54,7 @@ export interface Room {
   sessionId?: string
   pinned?: boolean
   hidden?: boolean
+  sectionId?: string
   createdAt?: number
 }
 
@@ -105,8 +112,15 @@ export interface TeamState {
   rooms?: Room[]
   mainBotId?: string | null
   mainBotIds?: string[]
-  models?: { ref: string; name: string; provider?: string; providerName?: string }[]
-  defaultModel?: string
+  models?: { ref: string; name: string; id?: string; provider?: string; providerName?: string; needsKey?: boolean }[]
+  modelsKey?: string
+  defaultModel?: string | null
+  permissions?: { options?: { value: string; name: string }[]; defaultPreset?: string } | null
+  readOnly?: string | null
+  partsRunning?: Record<string, boolean>
+  newSessions?: Record<string, 'opening' | 'empty'>
+  emptyParts?: Record<string, string[]>
+  sections?: { id: string; name: string; collapsed?: boolean; color?: string }[]
   memory?: boolean
   questions?: Record<string, Question>
   views?: Record<string, ShownView>

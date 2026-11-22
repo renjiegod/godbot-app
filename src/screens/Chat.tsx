@@ -106,13 +106,17 @@ const sameMessage = (item: ChatItem, sent: ChatItem) =>
 // The shared chat body for both shells: an inverted list (newest at the bottom, older
 // pages load as it scrolls up), the pending dock and the composer. `header` is the
 // shell's own (back row or pill).
-export function ChatView({ bot, room, header, onMissing }: { bot?: Bot; room?: Room; header: React.ReactNode; onMissing?: () => void }) {
+export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false }: {
+  bot?: Bot; room?: Room; header: React.ReactNode; onMissing?: () => void; sessionReadOnly?: boolean
+}) {
   const navigation = useNavigation<any>()
   const { team, call, refresh: refreshTeam, computer, hello } = useTeam()
   const { p, dark } = useTheme()
   const insets = useSafeAreaInsets()
   const id = bot?.id ?? room?.id ?? ''
-  const chatKey = `${computer?.hostDeviceId ?? ''}:${room !== undefined ? 'room' : 'bot'}:${id}`
+  const targetKey = `${computer?.hostDeviceId ?? ''}:${room !== undefined ? 'room' : 'bot'}:${id}`
+  const activePart = bot?.sessionId
+  const chatKey = activePart === undefined ? targetKey : `${targetKey}:${activePart}`
   const cached = pages.get(chatKey)
   const [pageState, setPageState] = useState<ChatWindow>(() => ({
     key: chatKey,
@@ -154,10 +158,18 @@ export function ChatView({ bot, room, header, onMissing }: { bot?: Bot; room?: R
     if (reading.current) { again.current = true; return }
     reading.current = true
     try {
-      const early = reads.get(chatKey)
-      reads.delete(chatKey)
-      const next = await (early ?? readChat(call, room !== undefined, id))
+      const early = reads.get(targetKey)
+      reads.delete(targetKey)
+      const prefetched = await early?.catch(() => undefined)
+      if (generation.current !== gen) return
+      const next = prefetched !== undefined && (activePart === undefined || prefetched.sessionId === activePart)
+        ? prefetched
+        : await readChat(call, room !== undefined, id)
       if (generation.current === gen) {
+        if (activePart !== undefined && next.sessionId !== undefined && next.sessionId !== activePart) {
+          refreshTeam?.()
+          return
+        }
         let lastBot: ChatItem | undefined
         let botCount = 0
         for (let i = next.items.length - 1; i >= 0; i -= 1) {
@@ -196,7 +208,7 @@ export function ChatView({ bot, room, header, onMissing }: { bot?: Bot; room?: R
       // The latest refresh, not this closure's: the chat may have changed meanwhile.
       if (again.current) { again.current = false; void latest.current(generation.current) }
     }
-  }, [call, id, chatKey])
+  }, [call, id, chatKey, targetKey, activePart, room !== undefined, refreshTeam])
   const latest = useRef(refresh)
   latest.current = refresh
 
@@ -245,6 +257,10 @@ export function ChatView({ bot, room, header, onMissing }: { bot?: Bot; room?: R
         ? await call('room-chat', { roomId: room.id, cursor, steps: true })
         : await call('chat', { botId: id, cursor, steps: true, inlineTools: true })) as ChatPage
       if (generation.current !== gen) return
+      if (activePart !== undefined && next.sessionId !== undefined && next.sessionId !== activePart) {
+        refreshTeam?.()
+        return
+      }
       setPageState(prev => {
         const boundary = prev.olderCursor === undefined ? prev.page?.cursor : prev.olderCursor
         return prev.key !== chatKey || prev.page?.sessionId !== page?.sessionId || JSON.stringify(boundary) !== JSON.stringify(cursor)
@@ -252,9 +268,9 @@ export function ChatView({ bot, room, header, onMissing }: { bot?: Bot; room?: R
       })
     } catch { /* keep the page we have */ }
     finally { loading.current = false; setLoadingOlder(false) }
-  }, [call, id, room?.id, chatKey, cursor, page?.sessionId])
+  }, [call, id, room?.id, chatKey, cursor, page?.sessionId, activePart, refreshTeam])
 
-  const sessionId = page?.sessionId ?? bot?.sessionId ?? room?.id ?? id
+  const sessionId = activePart ?? page?.sessionId ?? room?.id ?? id
   const question: Question | undefined = team?.questions?.[sessionId]
   const approvals = (team?.work?.approvals ?? []).filter((entry: Approval) => entry.sessionId === sessionId || (entry.roomId !== undefined && entry.roomId === room?.id))
   const doing = bot !== undefined ? team?.work?.bots?.[bot.id] ?? team?.activity?.[bot.id] : undefined
@@ -382,6 +398,8 @@ export function ChatView({ bot, room, header, onMissing }: { bot?: Bot; room?: R
     try {
       const images: string[] = []
       for (const photo of entry.photos) images.push(((await call('stage-image', { mediaType: photo.mediaType, data: photo.data })) as { id: string }).id)
+      // A delayed upload belongs to the part where the message was composed.
+      if (key !== latestKey.current) { mark('failed'); return }
       await call('send', { sessionId: entry.sessionId, text: entry.item.text ?? '', ...(images.length > 0 ? { images } : {}) })
       // What the chat already holds, so only a new row of the same text counts as this one.
       const kept = pages.get(key)
@@ -398,6 +416,7 @@ export function ChatView({ bot, room, header, onMissing }: { bot?: Bot; room?: R
   const latestKey = useRef(chatKey)
   latestKey.current = chatKey
   const send = async (text: string, photos: Photo[]) => {
+    if (sessionReadOnly || team?.readOnly) return
     const localId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
     const entry: Outgoing = { item: { kind: 'user', text, local: 'sending', localId, time: Date.now(), ...(photos.length > 0 ? { localImages: photos.map(photo => photo.uri) } : {}) }, photos, sessionId }
     setOutbox(chatKey, list => [...list, entry])
@@ -409,9 +428,10 @@ export function ChatView({ bot, room, header, onMissing }: { bot?: Bot; room?: R
     const entry = outboxOf(chatKey).find(o => o.item.localId === localId)
     if (entry === undefined) return
     if (discard === true) { setOutbox(chatKey, list => list.filter(o => o !== entry)); return }
+    if (sessionReadOnly || team?.readOnly) return
     setLoadError(null)
     void deliver(chatKey, entry)
-  }, [chatKey, deliver])
+  }, [chatKey, deliver, sessionReadOnly, team?.readOnly])
   const stop = () => {
     if (room !== undefined) void call('stop-room-work', { roomId: room.id }).catch(() => {})
     else if (bot !== undefined) void call('stop-chat', { botId: bot.id }).catch(() => {})
@@ -519,7 +539,18 @@ export function ChatView({ bot, room, header, onMissing }: { bot?: Bot; room?: R
       <Dock question={question} sessionId={sessionId} approvals={approvals} secrets={secrets} connectorRequests={connectorRequests} botName={bot?.name} onOpenConnector={connectorId => { if (connectorCanConnectOnMobile(connectorId)) navigation.navigate('Settings', { screen: 'Connectors', params: { focusId: connectorId }, initial: false }) }} btw={btw} handoff={browserHold} view={team?.views?.[sessionId]} call={call} p={p} expanded={expandedKey} onExpand={setExpandedKey} />
       {fileError ? <Text style={[type.small, { color: p.danger, textAlign: 'center', marginBottom: 4 }]} accessibilityRole="alert">{fileError}</Text> : null}
       {page !== null && loadError !== null ? <Text style={[type.small, { color: p.danger, textAlign: 'center', marginBottom: 4, marginHorizontal: 16 }]} accessibilityRole="alert">{loadError}</Text> : null}
-      <Composer name={bot?.name ?? room?.name ?? ''} running={running} canStop={canStop} canAttach={hello?.capabilities?.includes('send-images') === true} onSend={send} onStop={stop} p={p} />
+      {sessionReadOnly || team?.readOnly ? (
+        <View style={{ marginHorizontal: 12, marginBottom: Math.max(insets.bottom, 10), padding: 10, gap: 8, borderRadius: 12, backgroundColor: p.card, flexDirection: 'row', alignItems: 'center' }}>
+          <Text accessibilityRole="alert" style={[type.caption, { color: p.ink2, flex: 1 }]}>
+            {team?.readOnly || t('This session is still running. Wait for it to finish, or stop it.')}
+          </Text>
+          {team?.readOnly ? null : (
+            <Pressable accessibilityRole="button" onPress={stop} style={{ minHeight: 40, justifyContent: 'center', paddingHorizontal: 8 }}>
+              <Text style={[type.small, { color: p.accent }]}>{t('Stop')}</Text>
+            </Pressable>
+          )}
+        </View>
+      ) : <Composer key={chatKey} name={bot?.name ?? room?.name ?? ''} running={running} canStop={canStop} canAttach={hello?.capabilities?.includes('send-images') === true} onSend={send} onStop={stop} p={p} />}
       <Actions visible={menuText !== null} text={menuText ?? ''} p={p}
         onClose={() => setMenuText(null)}
         onSelect={() => { setReaderTitle(null); setReaderText(menuText); setMenuText(null) }} />

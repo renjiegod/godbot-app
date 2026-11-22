@@ -24,10 +24,11 @@ export function optimistic(team: TeamState | null, endpoint: string, payload: Re
     case 'set-main': {
       const id = String(payload.id ?? '')
       if (!team.bots.some(bot => bot.id === id)) return team
-      const mains = new Set(team.mainBotIds ?? [])
-      if (payload.main === false) mains.delete(id)
-      else mains.add(id)
-      const mainBotIds = [...mains]
+      const current = team.mainBotIds ?? (team.mainBotId ? [team.mainBotId] : [])
+      const others = current.filter(entry => entry !== id)
+      const at = typeof payload.replace === 'string' ? others.indexOf(payload.replace) : -1
+      const mainBotIds = payload.main === false ? others : at !== -1 ? others.with(at, id)
+        : payload.primary === true ? [id, ...others] : current.includes(id) ? current : [...others, id]
       return { ...team, mainBotIds, mainBotId: mainBotIds[0] ?? null }
     }
     case 'bot-capability': {

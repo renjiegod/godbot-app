@@ -55,8 +55,6 @@ const photoFetching = new Set<string>()
 export function useTeamLink(computer: SavedComputer, identity: PhoneIdentity) {
   const [team, setTeam] = useState<TeamState | null>(null)
   const [online, setOnline] = useState(false)
-  // The encrypted link is up (calls can go), before the handshake says the computer is current.
-  const [linked, setLinked] = useState(false)
   const [linkError, setLinkError] = useState<string | null>(null)
   const [pollError, setPollError] = useState<string | null>(null)
   const [hello, setHello] = useState<Hello | null>(null)
@@ -64,6 +62,8 @@ export function useTeamLink(computer: SavedComputer, identity: PhoneIdentity) {
   const revision = useRef<number>(-1)
   const writes = useRef<Write[]>([])
   const liveKey = useRef<string | undefined>(undefined)
+  const modelsKey = useRef('')
+  const boot = useRef<Hello['boot'] | undefined>(undefined)
   const pollRef = useRef<() => void>(() => {})
   const hostRef = useRef(computer.hostDeviceId)
   const switched = hostRef.current !== computer.hostDeviceId
@@ -73,14 +73,22 @@ export function useTeamLink(computer: SavedComputer, identity: PhoneIdentity) {
     revision.current = -1
     writes.current = []
     liveKey.current = undefined
+    modelsKey.current = ''
+    boot.current = undefined
     setTeam(null)
     setOnline(false)
-    setLinked(false)
     setLinkError(null)
     setPollError(null)
     setHello(null)
   }
   const onFeed = useCallback((handler: FeedHandler) => linkManager.onFeed(handler), [])
+  const stateRequest = useCallback(() => ({
+    since: revision.current,
+    avatars: 'ref',
+    live: liveKey.current,
+    models: modelsKey.current,
+    sessionOrder: true,
+  }), [])
 
   function fetchPhoto(botId: string, ref: string) {
     if (photoFetching.has(ref)) return
@@ -119,6 +127,7 @@ export function useTeamLink(computer: SavedComputer, identity: PhoneIdentity) {
     if (next.revision < revision.current) return
     revision.current = next.revision
     if (typeof next.liveKey === 'string') liveKey.current = next.liveKey
+    if (typeof next.modelsKey === 'string') modelsKey.current = next.modelsKey
     setTeam(prev => {
       const merged = next.unchanged === true && prev !== null ? { ...prev, ...next } : next
       return fillPhotos(withWrites(merged, writes.current), prev)
@@ -140,7 +149,7 @@ export function useTeamLink(computer: SavedComputer, identity: PhoneIdentity) {
       if (OPTIMISTIC.has(endpoint)) writes.current.push(write)
       setTeam(prev => optimistic(prev, endpoint, write.payload))
       try {
-        const answer = await callBotState<unknown>(client, endpoint, payload, { since: revision.current, avatars: 'ref', live: liveKey.current })
+        const answer = await callBotState<unknown>(client, endpoint, payload, stateRequest())
         writes.current = writes.current.filter(entry => entry !== write)
         if (answer.state !== undefined && clientRef.current === client) apply(answer.state)
         else if (PENDING_MUTATING.has(endpoint) && clientRef.current === client) pollRef.current()
@@ -156,7 +165,7 @@ export function useTeamLink(computer: SavedComputer, identity: PhoneIdentity) {
       }
       throw localized(failure)
     }
-  }, [apply])
+  }, [apply, stateRequest])
 
   useEffect(() => {
     let stopped = false
@@ -164,10 +173,11 @@ export function useTeamLink(computer: SavedComputer, identity: PhoneIdentity) {
     revision.current = -1
     writes.current = []
     liveKey.current = undefined
+    modelsKey.current = ''
+    boot.current = undefined
     clientRef.current = undefined
     setTeam(null)
     setOnline(false)
-    setLinked(false)
     setLinkError(null)
     setPollError(null)
     setHello(null)
@@ -183,7 +193,7 @@ export function useTeamLink(computer: SavedComputer, identity: PhoneIdentity) {
       reading = client
       again = false
       try {
-        const next = await callBot<TeamState>(client, 'state', { since: revision.current, avatars: 'ref', live: liveKey.current })
+        const next = await callBot<TeamState>(client, 'state', stateRequest())
         if (stopped || clientRef.current !== client) return
         apply(next)
         setPollError(null)
@@ -206,9 +216,20 @@ export function useTeamLink(computer: SavedComputer, identity: PhoneIdentity) {
       if (snap.client !== clientRef.current) {
         clientRef.current = snap.client
         clearTimeout(timer)
-        if (snap.client !== undefined) void poll()
+        if (snap.client !== undefined) {
+          const nextBoot = snap.hello?.boot
+          if (boot.current !== nextBoot) {
+            boot.current = nextBoot
+            revision.current = -1
+            liveKey.current = undefined
+            modelsKey.current = ''
+            writes.current = []
+            setTeam(null)
+            setPollError(null)
+          }
+          void poll()
+        }
       }
-      setLinked(snap.client !== undefined)
       setOnline(snap.online)
       setHello(snap.hello)
       setLinkError(snap.error)
@@ -235,7 +256,7 @@ export function useTeamLink(computer: SavedComputer, identity: PhoneIdentity) {
       release()
       clientRef.current = undefined
     }
-  }, [computer, identity, apply])
+  }, [computer, identity, apply, stateRequest])
 
   const refresh = useCallback(() => pollRef.current(), [])
   const error = linkError ?? pollError
@@ -243,7 +264,7 @@ export function useTeamLink(computer: SavedComputer, identity: PhoneIdentity) {
   return {
     team: switched ? null : team,
     online: switched ? false : online,
-    linked: switched ? false : linked,
+    linked: switched ? false : online,
     error: switched ? null : error,
     call,
     refresh,

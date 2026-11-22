@@ -275,7 +275,40 @@ const call = useMemo(() => async (endpoint: string, payload: unknown = {}): Prom
       case 'avatar-library': return { entries: [], done: true }
       case 'avatar-import': return { ok: true }
       case 'avatar-delete': return { ok: true }
-      case 'set-flags': return { ok: true }
+      case 'set-flags': {
+        const entry = bots.find(item => item.id === body.id) ?? (state.rooms ?? []).find(item => item.id === body.id)
+        if (!entry) throw new Error('Unknown conversation')
+        if (typeof body.pinned === 'boolean') entry.pinned = body.pinned
+        if (typeof body.hidden === 'boolean') entry.hidden = body.hidden
+        if (body.sectionId === null) delete entry.sectionId
+        else if (typeof body.sectionId === 'string') entry.sectionId = body.sectionId
+        touch()
+        return entry
+      }
+      case 'section-save': {
+        const list = (state.sections ??= [])
+        const id = typeof body.id === 'string' ? body.id : `section-${state.revision}`
+        const existing = list.find(item => item.id === id)
+        if (!existing && body.id) throw new Error('Unknown section')
+        const section = existing ?? { id, name: 'New section' }
+        if (!existing) list.push(section)
+        if (typeof body.name === 'string') section.name = body.name
+        if (typeof body.collapsed === 'boolean') section.collapsed = body.collapsed
+        const add: unknown[] = Array.isArray(body.add) ? body.add : []
+        for (const item of [...bots, ...(state.rooms ?? [])]) {
+          if (add.includes(item.id) && item.id !== state.mainBotId) item.sectionId = id
+        }
+        touch()
+        return section
+      }
+      case 'section-delete': {
+        state.sections = (state.sections ?? []).filter(item => item.id !== body.id)
+        for (const item of [...bots, ...(state.rooms ?? [])]) {
+          if (item.sectionId === body.id) delete item.sectionId
+        }
+        touch()
+        return state
+      }
       case 'stop-member-work': {
         const roomId = String(body.roomId ?? '')
         const list = state.work?.rooms?.[roomId]

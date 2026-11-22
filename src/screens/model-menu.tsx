@@ -3,6 +3,7 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, View, type GestureRespo
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { Bot, TeamState } from '../connection.ts'
 import { useTeam } from '../team/context.tsx'
+import { isLocalModel, modelRoute, modelsForBot } from '../team/bot-details.ts'
 import { t } from '../ui/i18n.ts'
 import { CheckIcon, ChevronRightIcon } from '../ui/icons.tsx'
 import { radius, type as typeScale, useTheme } from '../ui/tokens.ts'
@@ -33,34 +34,32 @@ export function groupModels(models: Model[]): [string, Model[]][] {
 }
 
 // What a Bot runs on, for display: the chosen model, else the one it last ran on.
-export function modelOf(bot: Bot, models: Model[]): { ref: string; name: string; provider: string } | undefined {
+export function modelOf(bot: Bot, models: Model[]): { ref: string; name: string; provider: string; served: boolean } | undefined {
   const ref = bot.model ?? bot.appliedModel
   if (!ref) return undefined
   const served = models.find(model => model.ref === ref)
   const [provider, ...rest] = ref.split('/')
-  return { ref, name: served?.name ?? rest.join('/'), provider: served?.providerName ?? provider }
+  const name = isLocalModel(ref) && (served?.id ?? rest.join('/')) === 'default' ? t('CLI default') : served?.name ?? (rest.join('/') || ref)
+  return { ref, name, provider: served?.providerName ?? provider, served: served !== undefined }
 }
 
 // The thinking levels of one model. The catalog carries them for models Bots use;
 // any other ref asks the computer once.
-const effortCache = new Map<string, Reasoning | null>()
 export function useReasoning(ref: string | undefined, models: Model[]): Reasoning | null | undefined {
-  const { call } = useTeam()
+  const { call, computer, hello, online } = useTeam()
   const served = models.find(model => model.ref === ref)?.reasoning
-  const [fetched, setFetched] = useState<Reasoning | null | undefined>(ref === undefined ? undefined : effortCache.get(ref))
+  const key = `${computer?.hostDeviceId ?? ''}:${hello?.boot ?? ''}:${ref ?? ''}`
+  const [fetched, setFetched] = useState<{ key: string; reasoning: Reasoning | null } | null>(null)
   useEffect(() => {
-    if (ref === undefined || served !== undefined) return
-    if (effortCache.has(ref)) { setFetched(effortCache.get(ref)); return }
+    if (!online || ref === undefined || served !== undefined) return
     let live = true
-    setFetched(undefined)
     call('efforts', { ref }).then(value => {
       const reasoning = (value as Reasoning)?.efforts ? value as Reasoning : null
-      effortCache.set(ref, reasoning)
-      if (live) setFetched(reasoning)
+      if (live) setFetched({ key, reasoning })
     }).catch(() => {})
     return () => { live = false }
-  }, [ref, served !== undefined])
-  return served ?? fetched
+  }, [call, key, online, served !== undefined])
+  return served ?? (fetched?.key === key ? fetched.reasoning : undefined)
 }
 
 export function effortLabel(reasoning: Reasoning | null | undefined, effort: string | undefined): string | undefined {
@@ -84,13 +83,15 @@ function effortStops(reasoning: Reasoning | null | undefined): { effort?: string
 const KNOB = 18
 const INSET = 11
 
-export function EffortBar({ reasoning, current, onPick }: { reasoning: Reasoning | null | undefined; current?: string; onPick: (effort: string | undefined) => void }) {
+export function EffortBar({ reasoning, current, onPick, disabled = false }: {
+  reasoning: Reasoning | null | undefined; current?: string; onPick: (effort: string | undefined) => void; disabled?: boolean
+}) {
   const { p } = useTheme()
   const stops = effortStops(reasoning)
   const [picked, setPicked] = useState(current)
   const [width, setWidth] = useState(0)
   const dragging = useRef(false)
-  useEffect(() => { if (!dragging.current) setPicked(current) }, [current])
+  useEffect(() => { if (!dragging.current && !disabled) setPicked(current) }, [current, disabled])
   if (stops.length === 0) return null
   const hasDefault = (reasoning?.efforts ?? []).some(effort => effort.id === reasoning?.defaultEffort)
   const activeEffort = picked ?? (hasDefault ? reasoning?.defaultEffort : undefined)
@@ -102,11 +103,12 @@ export function EffortBar({ reasoning, current, onPick }: { reasoning: Reasoning
     return stops[Math.round(r * (stops.length - 1))] ?? stops[0]
   }
   const commit = (effort: string | undefined) => {
+    if (disabled) return
     setPicked(effort)
     if ((effort ?? null) !== (current ?? null)) onPick(effort)
   }
   return (
-    <View style={{ gap: 6, paddingHorizontal: 16, paddingVertical: 10 }} accessibilityRole="adjustable" accessibilityLabel={t('Thinking level')}
+    <View style={{ gap: 6, paddingHorizontal: 16, paddingVertical: 10 }} accessibilityRole="adjustable" accessibilityLabel={t('Thinking level')} accessibilityState={{ disabled }}
       accessibilityValue={{ text: stops[activeIndex].label }}
       accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
       onAccessibilityAction={event => commit(stops[Math.max(0, Math.min(stops.length - 1, activeIndex + (event.nativeEvent.actionName === 'increment' ? 1 : -1)))].effort)}>
@@ -116,7 +118,7 @@ export function EffortBar({ reasoning, current, onPick }: { reasoning: Reasoning
           {picked === undefined && hasDefault ? <Text style={[typeScale.caption, { color: p.ink3 }]}>{t('Default')}</Text> : null}
           <Text style={{ fontSize: 13, lineHeight: 18, fontWeight: '600', color: p.accent, flexShrink: 1 }} numberOfLines={1}>{stops[activeIndex].label}</Text>
           {picked !== undefined || !hasDefault ? (
-            <Pressable accessibilityRole="button" accessibilityLabel={t('Default')} disabled={picked === undefined} onPress={() => commit(undefined)} hitSlop={10}
+            <Pressable accessibilityRole="button" accessibilityLabel={t('Default')} disabled={disabled || picked === undefined} onPress={() => commit(undefined)} hitSlop={10}
               style={{ width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: p.hover, opacity: picked === undefined ? 0.35 : 1 }}>
               <Text style={{ color: p.ink2, fontSize: 13 }}>↺</Text>
             </Pressable>
@@ -124,7 +126,7 @@ export function EffortBar({ reasoning, current, onPick }: { reasoning: Reasoning
         </View>
       </View>
       <View onLayout={event => setWidth(event.nativeEvent.layout.width)} style={{ height: 32, justifyContent: 'center' }}
-        onStartShouldSetResponder={() => true} onMoveShouldSetResponder={() => true} onResponderTerminationRequest={() => false}
+        onStartShouldSetResponder={() => !disabled} onMoveShouldSetResponder={() => !disabled} onResponderTerminationRequest={() => false}
         onResponderGrant={event => { dragging.current = true; setPicked(stopAt(event).effort) }}
         onResponderMove={event => setPicked(stopAt(event).effort)}
         onResponderRelease={event => { dragging.current = false; commit(stopAt(event).effort) }}
@@ -142,7 +144,7 @@ export function EffortBar({ reasoning, current, onPick }: { reasoning: Reasoning
 }
 
 // Every model under its provider, the default one marked.
-function ModelGroups({ models, current, fallback, onPick }: { models: Model[]; current?: string; fallback?: string; onPick: (ref: string) => void }) {
+function ModelGroups({ models, current, fallback, onPick }: { models: Model[]; current?: string; fallback?: string | null; onPick: (ref: string) => void }) {
   const { p } = useTheme()
   return (
     <ScrollView style={{ maxHeight: 420 }}>
@@ -152,7 +154,10 @@ function ModelGroups({ models, current, fallback, onPick }: { models: Model[]; c
           {list.map(item => (
             <Pressable key={item.ref} accessibilityRole="radio" accessibilityState={{ checked: item.ref === current }}
               onPress={() => onPick(item.ref)} style={({ pressed }) => [styles.row, pressed && { backgroundColor: p.hover }]}>
-              <Text style={[typeScale.settingsRow, { color: p.ink, flex: 1 }]} numberOfLines={1}>{item.name}</Text>
+              <Text style={[typeScale.settingsRow, { color: p.ink, flex: 1 }]} numberOfLines={1}>
+                {isLocalModel(item.ref) && item.ref.endsWith('/default') ? t('CLI default') : item.name}
+              </Text>
+              {item.needsKey ? <Text style={[typeScale.caption, { color: p.ink3 }]}>{t('Needs an API key')}</Text> : null}
               {item.ref === fallback ? <Text style={[typeScale.caption, { color: p.ink3 }]}>{t('Default')}</Text> : null}
               {item.ref === current ? <CheckIcon color={p.accent} /> : null}
             </Pressable>
@@ -165,12 +170,13 @@ function ModelGroups({ models, current, fallback, onPick }: { models: Model[]; c
 
 // A model picker for a Bot that does not exist yet (Create new Bot): the same trigger
 // and sheet as a Bot's model menu, without the thinking level.
-export function ModelPicker({ current, onPick }: { current?: string; onPick: (ref: string) => void }) {
+export function ModelPicker({ current, onPick, hostedOnly }: { current?: string; onPick: (ref: string) => void; hostedOnly?: boolean }) {
   const { p } = useTheme()
   const { team } = useTeam()
   const [open, setOpen] = useState(false)
   const insets = useSafeAreaInsets()
-  const models = (team?.models ?? []) as Model[]
+  const catalog = (team?.models ?? []) as Model[]
+  const models = hostedOnly ? modelsForBot(catalog) : catalog
   const model = models.find(item => item.ref === current)
   return (
     <>
@@ -194,28 +200,60 @@ export function ModelPicker({ current, onPick }: { current?: string; onPick: (re
 }
 
 // The trigger shows the model name over its provider and thinking level, as on the desktop.
-export function ModelMenu({ bot, onManage }: { bot: Bot; onManage: () => void }) {
+export function ModelMenu({ bot, onManage, readOnly = false }: { bot: Bot; onManage: () => void; readOnly?: boolean }) {
   const { p } = useTheme()
-  const { team, call } = useTeam()
+  const { team, call, refresh } = useTeam()
   const [open, setOpen] = useState(false)
+  const [reading, setReading] = useState(false)
+  const [writing, setWriting] = useState(false)
+  const saving = useRef(false)
   const [error, setError] = useState<string | null>(null)
   const insets = useSafeAreaInsets()
-  const models = (team?.models ?? []) as Model[]
-  const model = modelOf(bot, models)
-  const reasoning = useReasoning(model?.ref, models)
+  const catalog = (team?.models ?? []) as Model[]
+  const model = modelOf(bot, catalog)
+  const models = modelsForBot(catalog, model?.ref)
+  const local = isLocalModel(model?.ref)
+  const reasoning = useReasoning(model?.ref, catalog)
   const level = effortLabel(reasoning, bot.effort)
-  const save = (patch: Record<string, unknown>) => {
-    call('update-bot', { id: bot.id, ...patch }).then(() => setError(null), (failure: Error) => setError(failure?.message ?? String(failure)))
+  const save = async (patch: Record<string, unknown>) => {
+    if (readOnly || saving.current) return
+    saving.current = true
+    setWriting(true)
+    try {
+      await call('update-bot', { id: bot.id, ...patch })
+      setError(null)
+    } catch (failure) {
+      setError((failure as Error)?.message ?? String(failure))
+    } finally {
+      setWriting(false)
+      saving.current = false
+    }
+  }
+  const show = async () => {
+    if (readOnly) return
+    setOpen(true)
+    setReading(true)
+    try {
+      await (local ? call('local-agent-models', { route: modelRoute(model?.ref) }) : call('models'))
+      refresh?.()
+    } catch (failure) {
+      setError((failure as Error)?.message ?? String(failure))
+    } finally {
+      setReading(false)
+    }
   }
   return (
     <>
-      <Pressable accessibilityRole="button" accessibilityLabel={t('Model')} onPress={() => setOpen(true)}
+      <Pressable accessibilityRole="button" accessibilityLabel={t('Model')} accessibilityState={{ disabled: readOnly, expanded: open }}
+        disabled={readOnly} onPress={() => void show()}
         style={[styles.trigger, { backgroundColor: p.card, borderColor: p.line }]}>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={[typeScale.settingsRow, { color: p.ink, fontWeight: '500' }]} numberOfLines={1}>{model?.name ?? t('Choose a model')}</Text>
-          {model ? <Text style={[typeScale.caption, { color: p.ink3 }]} numberOfLines={1}>{[model.provider, level].filter(Boolean).join(' · ')}</Text> : null}
+          {model ? <Text style={[typeScale.caption, { color: p.ink3 }]} numberOfLines={1}>{model.served || models.length === 0
+            ? [model.provider, level].filter(Boolean).join(' · ')
+            : t('{provider} · not available', { provider: model.provider })}</Text> : null}
         </View>
-        <Text style={{ color: p.ink3, fontSize: 12 }}>⌄</Text>
+        {readOnly ? null : <Text style={{ color: p.ink3, fontSize: 12 }}>⌄</Text>}
       </Pressable>
       {model ? null : <Text style={[typeScale.small, { color: p.ink3, marginTop: 6 }]}>{t('Pick a model and {name} can start.', { name: bot.name })}</Text>}
       {error ? <Text style={[typeScale.small, { color: p.danger, marginTop: 6 }]}>{error}</Text> : null}
@@ -223,17 +261,23 @@ export function ModelMenu({ bot, onManage }: { bot: Bot; onManage: () => void })
         <Pressable style={styles.scrim} onPress={() => setOpen(false)} accessibilityLabel={t('Close')} />
         <View style={[styles.sheet, { backgroundColor: p.card, paddingBottom: insets.bottom + 8 }]}>
           <View style={[styles.grab, { backgroundColor: p.line }]} />
-          <ModelGroups models={models} current={model?.ref} fallback={team?.defaultModel} onPick={ref => { if (ref !== bot.model) save({ model: ref }) }} />
-          {model && (reasoning?.efforts?.length ?? 0) > 0 ? (
+          <View pointerEvents={writing || readOnly ? 'none' : 'auto'} accessibilityElementsHidden={readOnly} importantForAccessibility={readOnly ? 'no-hide-descendants' : 'auto'}>
+            <ModelGroups models={models} current={model?.ref} fallback={team?.defaultModel} onPick={ref => { if (ref !== bot.model) void save({ model: ref }) }} />
+          </View>
+          {reading ? <Text style={[typeScale.caption, styles.feedback, { color: p.ink3 }]}>{t('Reading models…')}</Text> : null}
+          {!reading && models.length === 0 ? <Text style={[typeScale.caption, styles.feedback, { color: p.ink3 }]}>{t('No models are set up in DeepSeek Harness yet.')}</Text> : null}
+          {error ? <Text accessibilityRole="alert" style={[typeScale.caption, styles.feedback, { color: p.danger }]}>{error}</Text> : null}
+          {model && (reasoning?.efforts?.length ?? 0) > 0 && !readOnly ? (
             <View style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: p.line, marginTop: 6 }}>
-              <EffortBar reasoning={reasoning} current={reasoning?.efforts?.some(e => e.id === bot.effort) ? bot.effort : undefined} onPick={effort => save({ effort: effort ?? null })} />
+              <EffortBar key={model.ref} reasoning={reasoning} current={reasoning?.efforts?.some(e => e.id === bot.effort) ? bot.effort : undefined}
+                disabled={writing} onPick={effort => void save({ effort: effort ?? null })} />
             </View>
           ) : null}
-          <Pressable accessibilityRole="button" onPress={() => { setOpen(false); onManage() }}
+          {local || readOnly ? null : <Pressable accessibilityRole="button" onPress={() => { setOpen(false); onManage() }}
             style={[styles.row, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: p.line }]}>
             <Text style={[typeScale.settingsRow, { color: p.ink, flex: 1 }]}>{t('Models and providers…')}</Text>
             <ChevronRightIcon color={p.ink3} />
-          </Pressable>
+          </Pressable>}
         </View>
       </Modal>
     </>
@@ -246,4 +290,5 @@ const styles = StyleSheet.create({
   sheet: { borderTopLeftRadius: 16, borderTopRightRadius: 16, paddingTop: 8 },
   grab: { alignSelf: 'center', width: 36, height: 4, borderRadius: 2, marginBottom: 4 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 48, paddingHorizontal: 16 },
+  feedback: { paddingHorizontal: 16, paddingVertical: 8 },
 })

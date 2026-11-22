@@ -1,155 +1,201 @@
-import { useMemo, useSyncExternalStore } from 'react'
-import { Pressable, StyleSheet, Text, View, SectionList } from 'react-native'
+import { useSyncExternalStore } from 'react'
+import { Pressable, SectionList, StyleSheet, Text, View } from 'react-native'
 import type { Bot, Room } from '../connection.ts'
 import { useTeam } from '../team/context.tsx'
-import { botHasPending, roomHasPending } from '../nav/pending.ts'
+import { pendingItemsOf } from '../nav/pending.ts'
+import { rosterOf, type ChatTarget, type RosterEntry, type RosterSection } from '../nav/sidebar-roster.ts'
 import { isUnread, seenVersion, subscribeSeen } from '../team/seen.ts'
-import { t } from '../ui/i18n.ts'
-import { radius, type as typeScale, useTheme } from '../ui/tokens.ts'
+import { hostText, t } from '../ui/i18n.ts'
+import { inkColor, radius, type as typeScale, useTheme } from '../ui/tokens.ts'
 import { Avatar, RoomAvatar } from '../ui/marks.tsx'
-import { PinMarkIcon } from '../ui/icons.tsx'
+import { ChevronRightIcon, DotsIcon, PinMarkIcon } from '../ui/icons.tsx'
 import { workPhrase } from '../ui/phrases.ts'
 import { cleanPreview } from './chat/settled.ts'
 
-export interface ChatTarget { kind: 'bot' | 'room'; id: string }
+export type { ChatTarget } from '../nav/sidebar-roster.ts'
 
-// The drawer's team list, laid out like the desktop sidebar (sidebar.js): every Main
-// Bot as a tile on top, then the other Bots and groups as rows, pinned first, then
-// by their latest message.
-export function TeamList({ onOpen, query = '', current }: { onOpen: (target: ChatTarget) => void; query?: string; current?: string }) {
-  const { team, error, computer } = useTeam()
+type Status = 'attention' | 'working' | 'unread'
+type Section = { key: string; data: RosterEntry[]; group?: ReturnType<typeof rosterOf>['sections'][number] }
+
+export function TeamList({ onOpen, onOptions, onSection, onToggleSection, query, current }: {
+  onOpen: (target: ChatTarget) => void
+  onOptions: (entry: RosterEntry) => void
+  onSection: (section: RosterSection) => void
+  onToggleSection: (section: RosterSection) => void
+  query: string
+  current?: ChatTarget
+}) {
+  const { team, computer, online } = useTeam()
   const { p, dark } = useTheme()
-  const hostId = computer?.hostDeviceId ?? ''
   useSyncExternalStore(subscribeSeen, seenVersion)
 
-  const bots = Array.isArray(team?.bots) ? team.bots : []
-  const mains = new Set(team?.mainBotIds ?? [])
-  const needle = query.trim().toLowerCase()
-  const mainList = bots.filter(bot => mains.has(bot.id) && bot.hidden !== true && (needle === '' || (bot.name ?? '').toLowerCase().includes(needle)))
+  const hostId = computer?.hostDeviceId ?? ''
+  const bots = team?.bots ?? []
+  const rooms = team?.rooms ?? []
+  const { lead, mains, ungrouped, sections } = rosterOf(team, current, query)
   const workBots = team?.work?.bots ?? {}
   const workRooms = team?.work?.rooms ?? {}
-  const waiting = team?.work?.waiting ?? {}
-  const questions = team?.questions ?? {}
-  const approvals = (Array.isArray(team?.work?.approvals) ? team.work.approvals : []).filter(a => a?.answerable !== false)
+  const pending = pendingItemsOf(team)
+  const selected = ({ kind, item }: RosterEntry) => current?.kind === kind && current.id === item.id
 
-  const entries = useMemo(() => {
-    const rooms = Array.isArray(team?.rooms) ? team.rooms : []
-    const list = [
-      ...bots.filter(bot => !mains.has(bot.id) && bot.hidden !== true).map(bot => ({ kind: 'bot' as const, item: bot })),
-      ...rooms.filter(room => room.hidden !== true).map(room => ({ kind: 'room' as const, item: room })),
-    ]
-    return list
-      .filter(entry => needle === '' || (entry.item.name ?? '').toLowerCase().includes(needle))
-      .sort((a, b) => Number(Boolean(b.item.pinned)) - Number(Boolean(a.item.pinned)) || (b.item.lastAt ?? b.item.createdAt ?? 0) - (a.item.lastAt ?? a.item.createdAt ?? 0))
-  }, [bots, team?.rooms, team?.mainBotIds, needle])
-
-  const preview = (bot: Bot): string | undefined => {
-    const sessionId = bot.sessionId ?? bot.id
-    if (questions[sessionId] !== undefined || team?.views?.[sessionId] !== undefined) return t('Waiting for your answer')
-    if (approvals.some(a => a?.botId === bot.id)) return t('Waiting for your approval')
-    const doing = workBots[bot.id] ?? team?.activity?.[bot.id]
-    if (doing !== undefined) return `${workPhrase(doing)}…`
-    const groupWork = Object.entries(workRooms).find(([, list]) => Array.isArray(list) && list.some(e => e?.botId === bot.id))
-    const workingEntry = groupWork?.[1]?.find(e => e?.botId === bot.id)
-    if (groupWork && workingEntry !== undefined) {
-      const room = team?.rooms?.find(r => r.id === groupWork[0])
-      return `${room?.name ?? t('a group chat')} · ${workPhrase(workingEntry)}…`
-    }
-    const waits = waiting[bot.id]
-    if (waits !== undefined && (waits.bots?.length || waits.rooms?.length)) return t('Waiting for your answer')
-    return cleanPreview(bot.preview) ?? bot.role
+  const activityOf = (bot: Bot) => workBots[bot.id] ?? team?.activity?.[bot.id]
+  const waitsFor = (id: string) => {
+    const waiting = team?.work?.waiting?.[id]
+    const names = [
+      ...(waiting?.bots ?? []).map(botId => bots.find(bot => bot.id === botId)?.name),
+      ...(waiting?.rooms ?? []).map(roomId => rooms.find(room => room.id === roomId)?.name),
+    ].filter(Boolean)
+    return names.length > 0 ? t('Waiting for {names}', { names: names.join(t(' and ')) }) : undefined
   }
-  const roomPreview = (room: Room): string | undefined => {
-    if (approvals.some(a => a?.roomId === room.id)) return t('Waiting for your approval')
-    const members = Array.isArray(workRooms[room.id]) ? workRooms[room.id] : []
-    if (members.length > 0) {
-      const name = bots.find(b => b.id === members[0]?.botId)?.name ?? ''
-      return `${name} · ${workPhrase(members[0])}…${members.length > 1 ? ` +${members.length - 1}` : ''}`
-    }
-    return room.preview
+  const botStatus = (bot: Bot) => {
+    const needs = pending.filter(item => item.botId === bot.id)
+    const attention = needs.length > 0
+    const action = needs.some(item => item.kind === 'approval') ? t('Waiting for your approval') : t('Waiting for your answer')
+    const doing = activityOf(bot)
+    const group = Object.entries(workRooms).flatMap(([roomId, entries]) => entries.filter(item => item.botId === bot.id).map(item => ({ roomId, item })))
+    const away = group[0]
+    const running = doing !== undefined || away !== undefined
+    const work = doing !== undefined ? `${workPhrase(doing)}…` : away === undefined
+      ? undefined
+      : `${rooms.find(room => room.id === away.roomId)?.name ?? t('a group chat')} · ${workPhrase(away.item)}…${group.length > 1 ? ` +${group.length - 1}` : ''}`
+    return { attention, running, preview: attention ? action : waitsFor(bot.id) ?? work ?? cleanPreview(bot.preview) }
   }
+  const roomStatus = (room: Room) => {
+    const attention = pending.some(item => item.kind === 'approval' && item.roomId === room.id)
+    const groupWork = workRooms[room.id] ?? []
+    const first = groupWork[0]
+    const title = bots.find(bot => bot.id === first?.botId)?.name
+    const work = first && title ? `${title} · ${workPhrase(first)}…${groupWork.length > 1 ? ` +${groupWork.length - 1}` : ''}` : undefined
+    return { attention, running: first !== undefined, preview: attention ? t('Waiting for your approval') : work ?? cleanPreview(room.preview) }
+  }
+  const status = (entry: RosterEntry): Status | undefined => {
+    const { attention, running } = entry.kind === 'bot' ? botStatus(entry.item) : roomStatus(entry.item)
+    if (attention) return 'attention'
+    if (running) return 'working'
+    if (isUnread(hostId, entry.item.id, entry.item.lastAt, selected(entry))) return 'unread'
+  }
+  const data: Section[] = [
+    { key: 'ungrouped', data: ungrouped },
+    ...sections.map(group => ({ key: group.section.id, group, data: group.collapsed ? [] : group.entries })),
+  ]
+  const open = (entry: RosterEntry) => onOpen({ kind: entry.kind, id: entry.item.id })
 
   return (
-    <View style={styles.root}>
-      {error ? <Text style={[typeScale.small, { color: p.danger, paddingHorizontal: 20, paddingBottom: 4 }]} accessibilityRole="alert">{error}</Text> : null}
-      <SectionList
-        sections={[{ data: entries }]}
-        keyExtractor={entry => `${entry.kind}-${entry.item.id}`}
-        stickySectionHeadersEnabled={false}
-        ListHeaderComponent={mainList.length > 0 ? (
-          <View style={styles.tiles}>
-            {mainList.map(main => (
-              <Pressable key={main.id} accessibilityRole="button" accessibilityLabel={`${main.name}, ${t('Main Bot')}`} onPress={() => onOpen({ kind: 'bot', id: main.id })}
-                style={({ pressed }) => [styles.tile, { backgroundColor: pressed || current === main.id ? p.active : p.hover }]}>
-                <Avatar bot={main} dark={dark} size={52} ring={p.hover} main working={workBots[main.id] !== undefined} waiting={botHasPending(team, main)} />
-                <Text style={[typeScale.small, { color: p.ink, fontWeight: '600', marginTop: 6 }]} numberOfLines={1}>{main.name}</Text>
-                {main.role ? <View style={[styles.tag, { backgroundColor: p.active }]}><Text style={{ fontSize: 11, lineHeight: 15, color: p.ink2 }} numberOfLines={1}>{main.role}</Text></View> : null}
+    <SectionList<RosterEntry, Section>
+      style={styles.root}
+      keyboardShouldPersistTaps="handled"
+      stickySectionHeadersEnabled={false}
+      sections={data}
+      keyExtractor={entry => `${entry.kind}-${entry.item.id}`}
+      ListHeaderComponent={(
+        <>
+          {team?.readOnly ? <Text style={[styles.hint, { color: p.ink2 }]} accessibilityRole="alert">{hostText(team.readOnly)}</Text> : null}
+          {lead ? (
+            <View style={styles.tileWrap}>
+              <Pressable
+                accessibilityRole="button" accessibilityLabel={`${lead.name}, ${t('Main Bot')}`}
+                accessibilityState={{ selected: current?.kind === 'bot' && current.id === lead.id }}
+                onPress={() => onOpen({ kind: 'bot', id: lead.id })}
+                onLongPress={() => onOptions({ kind: 'bot', item: lead })}
+                accessibilityActions={[{ name: 'longpress', label: t('More options') }]}
+                onAccessibilityAction={() => onOptions({ kind: 'bot', item: lead })}
+                style={({ pressed }) => [styles.tile, { backgroundColor: pressed || (current?.kind === 'bot' && current.id === lead.id) ? p.active : p.hover }]}
+              >
+                <Avatar bot={lead} dark={dark} size={36} ring={p.sidebar} main
+                  working={botStatus(lead).running} waiting={botStatus(lead).attention} />
+                <Text style={[typeScale.small, { color: p.ink, fontWeight: '600' }]} numberOfLines={1}>{lead.name}</Text>
+                {lead.role ? <Text style={[styles.tileTag, { color: p.tagInk, backgroundColor: p.tagBg }]} numberOfLines={1}>{lead.role}</Text> : null}
               </Pressable>
-            ))}
+            </View>
+          ) : null}
+          {team && query.trim() !== '' && !lead && ungrouped.length === 0 && sections.length === 0
+            ? <Text style={[styles.hint, { color: p.ink3 }]}>{t('No results')}</Text> : null}
+        </>
+      )}
+      renderSectionHeader={({ section: { group } }) => {
+        if (!group) return null
+        const { section, entries, collapsed } = group
+        const statuses = new Set(collapsed ? entries.map(status) : [])
+        const aggregate = (['attention', 'working', 'unread'] as const).find(value => statuses.has(value))
+        const color = section.color ? inkColor(section.color, dark) : p.line2
+        const toggleDisabled = query.trim() !== '' || !online || Boolean(team?.readOnly)
+        const active = collapsed && entries.some(selected)
+        return (
+          <View style={[styles.sectionHeader, { backgroundColor: p.sidebar }]}>
+            <Pressable accessibilityRole="button" accessibilityState={{ expanded: !collapsed, disabled: toggleDisabled, selected: active }}
+              disabled={toggleDisabled} onPress={() => onToggleSection(section)}
+              style={({ pressed }) => [styles.sectionToggle, (pressed || active) && { backgroundColor: p.hover }]}>
+              <View style={{ transform: [{ rotate: collapsed ? '0deg' : '90deg' }] }}><ChevronRightIcon size={16} /></View>
+              <View style={[styles.sectionMark, { backgroundColor: color }]} />
+              <Text style={[typeScale.small, { color: p.ink, fontWeight: '600', flex: 1 }]} numberOfLines={1}>{section.name}</Text>
+              {collapsed ? <Text style={[typeScale.caption, { color: p.ink3 }]}>{entries.length}</Text> : null}
+              <StatusDot status={aggregate} />
+            </Pressable>
+            <Pressable accessibilityRole="button" accessibilityLabel={t('{name} actions', { name: section.name })}
+              onPress={() => onSection(section)} style={({ pressed }) => [styles.sectionOptions, pressed && { backgroundColor: p.hover }]}>
+              <DotsIcon size={18} />
+            </Pressable>
           </View>
-        ) : undefined}
-        renderItem={({ item: entry }) => entry.kind === 'bot' ? (
-          <BotRow bot={entry.item} p={p} dark={dark} mains={mains} waiting={botHasPending(team, entry.item)} workBots={workBots} preview={preview(entry.item)} selected={current === entry.item.id} unread={isUnread(hostId, entry.item.id, entry.item.lastAt, current === entry.item.id)} onPress={() => onOpen({ kind: 'bot', id: entry.item.id })} />
-        ) : (
-          <RoomRow room={entry.item} bots={bots} p={p} dark={dark} waiting={roomHasPending(team, entry.item)} preview={roomPreview(entry.item)} selected={current === entry.item.id} unread={isUnread(hostId, entry.item.id, entry.item.lastAt, current === entry.item.id)} working={(workRooms[entry.item.id] ?? []).length > 0} onPress={() => onOpen({ kind: 'room', id: entry.item.id })} />
-        )}
-        ListEmptyComponent={<Text style={[typeScale.small, { color: p.ink3, textAlign: 'center', marginTop: 40 }]}>{team === null ? t('Connecting…') : ''}</Text>}
-      />
-    </View>
+        )
+      }}
+      renderItem={({ item: entry, section }) => {
+        const on = selected(entry)
+        const access = () => onOptions(entry)
+        const { item } = entry
+        const { preview, attention, running } = entry.kind === 'bot' ? botStatus(entry.item) : roomStatus(entry.item)
+        const engineModel = entry.kind === 'bot' ? entry.item.engine : undefined
+        const engine = engineModel ? team?.models?.find(model => model.provider === engineModel || model.ref.startsWith(`${engineModel}/`))?.providerName
+          ?? engineModel.replace(/^local-/, '').replaceAll('-', ' ') : undefined
+        const unread = isUnread(hostId, item.id, item.lastAt, on)
+        const rowStatus = attention ? 'attention' : running ? 'working' : unread ? 'unread' : undefined
+        const hidden = item.hidden === true && query.trim() !== ''
+        const summary = [preview, hidden ? t('Hidden') : undefined].filter(Boolean).join(' · ')
+        const description = [engine, item.pinned ? t('Pinned') : undefined, summary, unread ? t('Unread activity') : undefined].filter(Boolean).join(', ')
+        return (
+          <Pressable accessibilityRole="button" accessibilityLabel={item.name} accessibilityHint={description || undefined}
+            accessibilityState={{ selected: on }}
+            onPress={() => open(entry)} onLongPress={access}
+            accessibilityActions={[{ name: 'longpress', label: t('More options') }]} onAccessibilityAction={access}
+            style={({ pressed }) => [styles.row, section.group ? styles.groupRow : null, (pressed || on) && { backgroundColor: p.hover }]}>
+            {entry.kind === 'bot'
+              ? <Avatar bot={entry.item} dark={dark} size={36} ring={p.sidebar} main={mains.has(item.id)} />
+              : <RoomAvatar room={entry.item} bots={bots} dark={dark} size={36} ring={p.sidebar} />}
+            <View style={styles.rowBody}>
+              <View style={styles.nameRow}>
+                <Text style={[typeScale.rowName, { color: p.ink, flexShrink: 1 }]} numberOfLines={1}>{item.name}</Text>
+                {engine ? <Text style={[styles.engine, { color: p.tagInk, backgroundColor: p.tagBg }]} numberOfLines={1}>{engine}</Text> : null}
+                {item.pinned ? <PinMarkIcon size={12} /> : null}
+              </View>
+              {summary ? <Text style={[typeScale.rowPreview, { color: attention ? p.accent : p.ink2 }]} numberOfLines={1}>{summary}</Text> : null}
+            </View>
+            <StatusDot status={rowStatus} />
+          </Pressable>
+        )
+      }}
+    />
   )
 }
 
-function BotRow({ bot, p, dark, mains, waiting, workBots, preview, unread, selected, onPress }: {
-  bot: Bot; p: ReturnType<typeof useTheme>['p']; dark: boolean; mains: Set<string>
-  waiting: boolean; workBots: Record<string, unknown>; preview?: string; unread?: boolean; selected?: boolean; onPress: () => void
-}) {
-  return (
-    <Pressable accessibilityRole="button" onPress={onPress} style={({ pressed }) => [styles.row, (pressed || selected) && { backgroundColor: p.hover }]}>
-      <Avatar bot={bot} dark={dark} size={36} ring={p.sidebar} main={mains.has(bot.id)} working={workBots[bot.id] !== undefined} waiting={waiting} />
-      <View style={styles.rowBody}>
-        <View style={styles.nameRow}>
-          <Text style={[typeScale.rowName, { color: p.ink, flexShrink: 1 }]} numberOfLines={1}>{bot.name}</Text>
-          {bot.pinned === true ? <PinMarkIcon size={12} /> : null}
-          {unread === true ? <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: p.accent, marginLeft: 'auto' }} /> : null}
-        </View>
-        {preview ? <Text style={[typeScale.rowPreview, { color: p.ink2 }]} numberOfLines={1}>{preview}</Text> : null}
-      </View>
-    </Pressable>
-  )
-}
-
-function RoomRow({ room, bots, p, dark, waiting, preview, unread, working, selected, onPress }: {
-  room: Room; bots: Bot[]; p: ReturnType<typeof useTheme>['p']; dark: boolean
-  waiting: boolean; preview?: string; unread?: boolean; working: boolean; selected?: boolean; onPress: () => void
-}) {
-  return (
-    <Pressable accessibilityRole="button" onPress={onPress} style={({ pressed }) => [styles.row, (pressed || selected) && { backgroundColor: p.hover }]}>
-      <View>
-        <RoomAvatar room={room} bots={bots} dark={dark} size={36} ring={p.sidebar} />
-        {waiting ? <View style={[styles.waitDot, { borderColor: p.main }]}>
-          <View style={[styles.waitIn, { backgroundColor: p.accent }]}><Text style={{ color: '#fff', fontSize: 9, fontWeight: '600', textAlign: 'center', lineHeight: 11 }}>?</Text></View>
-        </View> : working ? <View style={[styles.waitDot, { borderColor: p.main }]}><View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: p.green }} /></View> : null}
-      </View>
-      <View style={styles.rowBody}>
-        <View style={styles.nameRow}>
-          <Text style={[typeScale.rowName, { color: p.ink, flexShrink: 1 }]} numberOfLines={1}>{room.name}</Text>
-          {room.pinned === true ? <PinMarkIcon size={12} /> : null}
-          {unread === true ? <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: p.accent, marginLeft: 'auto' }} /> : null}
-        </View>
-        {preview ? <Text style={[typeScale.rowPreview, { color: p.ink2 }]} numberOfLines={1}>{preview}</Text> : null}
-      </View>
-    </Pressable>
-  )
+function StatusDot({ status }: { status?: Status }) {
+  const { p } = useTheme()
+  if (!status) return null
+  return <View style={[styles.statusDot, { backgroundColor: status === 'working' ? p.green : p.accent }, status === 'attention' && { width: 9, height: 9, borderColor: p.sidebar, borderWidth: 1 }]} />
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  tiles: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8, paddingHorizontal: 12, paddingTop: 4, paddingBottom: 10 },
-  tile: { width: 104, alignItems: 'center', borderRadius: radius.card, paddingTop: 10, paddingBottom: 8, paddingHorizontal: 6 },
-  tag: { marginTop: 3, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, maxWidth: '100%' },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 52, paddingVertical: 6, paddingHorizontal: 10, marginHorizontal: 8, borderRadius: 10 },
+  hint: { marginHorizontal: 16, paddingVertical: 8, fontSize: 13 },
+  tileWrap: { alignItems: 'center', paddingTop: 2, paddingBottom: 8 },
+  tile: { minWidth: 96, maxWidth: '76%', gap: 3, alignItems: 'center', borderRadius: radius.card, paddingVertical: 7, paddingHorizontal: 10 },
+  tileTag: { borderRadius: 5, paddingHorizontal: 6, fontSize: 11, lineHeight: 15 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 48, paddingVertical: 5, paddingHorizontal: 8, marginHorizontal: 8, borderRadius: radius.row },
+  groupRow: { marginLeft: 16 },
   rowBody: { flex: 1, minWidth: 0 },
-  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  waitDot: { position: 'absolute', bottom: -2, right: -2, width: 18, height: 18, borderRadius: 9, borderWidth: 3, alignItems: 'center', justifyContent: 'center' },
-  waitIn: { width: 12, height: 12, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  engine: { flexShrink: 0, maxWidth: '40%', borderRadius: 4, paddingHorizontal: 4, fontSize: 10, lineHeight: 15 },
+  statusDot: { width: 7, height: 7, borderRadius: 5 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', minHeight: 44, marginTop: 3, paddingHorizontal: 8 },
+  sectionToggle: { flex: 1, flexDirection: 'row', alignItems: 'center', minHeight: 44, paddingLeft: 6, paddingRight: 4, gap: 5, borderRadius: radius.row },
+  sectionMark: { width: 3, height: 13, borderRadius: 2 },
+  sectionOptions: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: radius.row },
 })

@@ -11,9 +11,7 @@ test('the phone names the API versions it speaks', () => {
 
 test('a Godbot computer that speaks API 1 is accepted', () => {
   assert.deepEqual(checkHello(godbot), { ok: true })
-  // Fixtures and very early hosts leave out the plugin; the API version decides then.
-  const { plugin: _plugin, ...noPlugin } = godbot
-  assert.deepEqual(checkHello(noPlugin), { ok: true })
+  assert.deepEqual(checkHello({ ...godbot, plugin: undefined }), { ok: false, reason: 'update-godbot' })
 })
 
 test('no common API version asks to update Godbot, or this app when the computer is newer', () => {
@@ -26,6 +24,8 @@ test('a missing or broken answer means the computer is too old', () => {
   assert.deepEqual(checkHello(null), { ok: false, reason: 'update-godbot' })
   assert.deepEqual(checkHello('hello'), { ok: false, reason: 'update-godbot' })
   assert.deepEqual(checkHello([]), { ok: false, reason: 'update-godbot' })
+  assert.deepEqual(checkHello({ api: 1 }), { ok: false, reason: 'update-godbot' })
+  assert.deepEqual(checkHello({ ...godbot, boot: '' }), { ok: false, reason: 'update-godbot' })
 })
 
 test('DS Bot on the other end is named, not mistaken for an old Godbot', () => {
