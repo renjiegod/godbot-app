@@ -14,7 +14,7 @@ test('the release build signs with the upload key when the build names one, else
   const release = signed.slice(signed.indexOf('buildTypes {'))
   assert.match(release, /release \{[\s\S]*signingConfig System\.getenv\('GODBOT_ANDROID_KEYSTORE'\) \? signingConfigs\.release : signingConfigs\.debug/)
   assert.match(release, /debug \{\n\s*signingConfig signingConfigs\.debug\n/)
-  assert.match(signed, /withBuildType\("release"\)[\s\S]*variant\.packaging\.jniLibs\.excludes\.addAll\(\["\*\*\/x86\/\*\*", "\*\*\/x86_64\/\*\*"\]\)/)
+  assert.match(signed, /withBuildType\("release"\)[\s\S]*variant\.packaging\.jniLibs\.excludes\.addAll\(\["\*\*\/x86\/\*\*", "\*\*\/x86_64\/\*\*", "\*\*\/armeabi-v7a\/\*\*"\]\)/)
   assert.equal(sign(signed), signed)
 })
 
