@@ -10,7 +10,7 @@ Chat with your Bots, respond to approval requests, and manage your Godbot team f
 
 ## Install and pair
 
-1. Download `godbot-<version>.apk` from the latest [GitHub Release][releases]. Sign in with an account that has access to this repository. The APK supports Android 7.0 (API 24) or later on ARM phones (`arm64-v8a` and `armeabi-v7a`).
+1. Download `godbot-<version>.apk` from the latest [GitHub Release][releases]. The APK supports Android 7.0 (API 24) or later on ARM phones (`arm64-v8a` and `armeabi-v7a`).
 2. Open the APK and allow installs from that source if Android prompts. If you have the older debug-signed test build, uninstall it first. Uninstalling clears the app's local settings and pairings.
 3. On your computer, open Godbot's **Settings → Phone**. Enter a relay address such as `wss://<your relay>/v1/link`, enable phone access, and show the pairing QR code.
 4. In the Android app, tap **Use the camera** to scan the QR code, or paste the pairing link. If you open a `godbot://pair?…` link from another app, check the computer and server shown before tapping **Pair**.
@@ -32,7 +32,7 @@ Open a Bot from the team list and send a message. To pair or switch to another c
 
 ## Connection and updates
 
-Godbot on your computer and the Android app each make an outbound WebSocket connection to a relay server. The Noise IK handshake establishes end-to-end encryption. The relay forwards encrypted frames between the paired devices.
+Godbot on your computer and the Android app each make an outbound WebSocket connection to a relay server. The Noise IK handshake establishes end-to-end encryption. The relay forwards encrypted frames between the paired devices. See the [Godbot link implementation][link] for details.
 
 Turn on **Settings → Keep connected in background** for an ongoing Android notification and a foreground service that reconnects when the link drops. If Android stops the service, use the **Battery optimization** and **Auto-start and lock** shortcuts in Settings. Encrypted Firebase push is available for deployments that configure Firebase on both the app and relay.
 
@@ -89,4 +89,5 @@ Godbot for Android is licensed under the [Apache License 2.0](LICENSE). [NOTICE]
 
 [releases]: https://github.com/renjiegod/godbot-app/releases/latest
 [desktop]: https://github.com/renjiegod/dsh-godbot#readme
+[link]: https://github.com/renjiegod/dsh-godbot/tree/main/src/link
 [dsh-go]: https://github.com/ccch1mneyyy/dsh-Go
