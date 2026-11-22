@@ -118,3 +118,15 @@ Industries, Inc. and Meta Platforms, Inc. and affiliates). The phone link uses
 @noble/ciphers, @noble/curves and @noble/hashes (MIT, Copyright (c) Paul Miller)
 and @lukeburns/clatterjs (MIT, Copyright (c) 2025 Joni Lepistö). Simple Icons
 vector marks used by DS Bot's icons are CC0 1.0 (the Simple Icons contributors).
+
+Android remote computer controller
+
+react-native-webrtc (MIT), Copyright (c) 2017-present React Native WebRTC
+Community and (c) 2015-2017 Howard Yang. Its Android module links the Jitsi
+distribution of WebRTC. See https://github.com/jitsi/webrtc and its upstream
+WebRTC license notices.
+react-native-webview (MIT), Copyright (c) 2015-present, Facebook, Inc.
+xterm.js (MIT), Copyright (c) the xterm.js authors and Christopher Jeffrey.
+@xterm/addon-fit (MIT), Copyright (c) 2019, The xterm.js authors.
+The MIT permission notice and copyright text shipped with each npm package is
+included under the Android APK's assets/machine/licenses directory.

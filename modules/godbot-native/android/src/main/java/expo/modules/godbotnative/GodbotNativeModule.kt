@@ -72,6 +72,10 @@ class GodbotNativeModule : Module() {
     Name("GodbotNative")
 
     Events(TICK_EVENT)
+    View(RemoteKeyboardView::class) {
+      Events("onHardwareKey", "onKeyboardBlur")
+      Prop("label") { view: RemoteKeyboardView, label: String -> view.setLabel(label) }
+    }
 
     OnCreate { current = WeakReference(this@GodbotNativeModule) }
 

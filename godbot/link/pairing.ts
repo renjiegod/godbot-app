@@ -56,6 +56,15 @@ function checkHello(value: unknown): HandshakeHello {
 }
 
 export function pairingUri(offer: PairingOffer): string {
+  return offerUri(offer, 'pair')
+}
+
+/** A dedicated offer kind keeps machine enrollment separate from team pairing. */
+export function machinePairingUri(offer: PairingOffer): string {
+  return offerUri(offer, 'computer-pair')
+}
+
+function offerUri(offer: PairingOffer, kind: string): string {
   const query = new URLSearchParams({
     v: '1',
     server: offer.server,
@@ -64,12 +73,25 @@ export function pairingUri(offer: PairingOffer): string {
     code: offer.code,
     name: offer.name,
   })
-  return `${PAIRING_SCHEME}//pair?${query}`
+  return `${PAIRING_SCHEME}//${kind}?${query}`
 }
 
 export function parsePairingUri(uri: string): PairingOffer {
+  return parseOffer(uri, 'pair', PAIRING_SCHEMES)
+}
+
+export function parseMachinePairingUri(uri: string): PairingOffer {
+  const offer = parseOffer(uri, 'computer-pair', [PAIRING_SCHEME])
+  const server = new URL(offer.server)
+  if (server.username || server.password || server.hash || server.search || (server.protocol === 'ws:' && !['127.0.0.1', 'localhost', '[::1]'].includes(server.hostname))) {
+    throw new Error('A computer requires a secure relay or a loopback development relay.')
+  }
+  return offer
+}
+
+function parseOffer(uri: string, kind: string, schemes: readonly string[]): PairingOffer {
   const url = new URL(uri)
-  if (!PAIRING_SCHEMES.includes(url.protocol) || url.host !== 'pair' || url.searchParams.get('v') !== '1') {
+  if (!schemes.includes(url.protocol) || url.host !== kind || url.searchParams.get('v') !== '1') {
     throw new Error('Invalid phone pairing code.')
   }
   const field = (name: string): string => {

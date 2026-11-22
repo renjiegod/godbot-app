@@ -1,8 +1,8 @@
 // Godbot: pairing links. Godbot computers from this version on show `godbot://pair?…`;
 // older ones show the DS Bot scheme `dsbot://pair?…`, which the app still accepts.
-import { parsePairingUri, type PairingOffer } from '../../godbot/link/index.ts'
+import { parseMachinePairingUri, parsePairingUri, type PairingOffer } from '../../godbot/link/index.ts'
 
-export const PAIRING_PREFIXES = ['godbot://pair', 'dsbot://pair']
+export const PAIRING_PREFIXES = ['godbot://pair?', 'dsbot://pair?', 'godbot://computer-pair?']
 
 /** Whether a URL that opened the app is a pairing link. */
 export function isPairingLink(url: unknown): url is string {
@@ -10,11 +10,16 @@ export function isPairingLink(url: unknown): url is string {
 }
 
 /** What the confirmation shows before anything is sent: the computer and its Server. */
-export interface PairingPreview { offer: PairingOffer; server: string; name: string }
+export interface PairingPreview { offer: PairingOffer; kind: 'machine' | 'team'; server: string; name: string }
 
-export function previewPairing(uri: string): PairingPreview {
-  const offer = parsePairingUri(uri.trim())
-  return { offer, server: serverLabel(offer.server), name: offer.name }
+export function previewPairing(uri: string, machineOnly = false): PairingPreview {
+  const text = uri.trim()
+  const machine = text.startsWith('godbot://computer-pair?')
+  const offer = machine ? parseMachinePairingUri(text) : parsePairingUri(text)
+  if (machineOnly && !machine) {
+    throw new Error('This code pairs a Godbot team. Create a pairing offer in Godbot Computer Host to pair a remote computer.')
+  }
+  return { offer, kind: machine ? 'machine' : 'team', server: serverLabel(offer.server), name: offer.name }
 }
 
 /** The relay address as a person reads it: host and port, and whether it is encrypted. */

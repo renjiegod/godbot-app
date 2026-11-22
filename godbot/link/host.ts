@@ -32,6 +32,8 @@ import type { DeviceIdentity } from './secure-transport.ts'
 import { waitForRelayCapacity } from './transport.ts'
 
 export interface HostRequest {
+  /** Opaque identity valid only for this authenticated tunnel instance. */
+  tunnelId: string
   deviceId: string
   signal: AbortSignal
 }
@@ -52,6 +54,7 @@ export interface HostLinkOptions {
   onStatus?: (status: HostLinkStatus) => void
   /** How many phones hold a ready tunnel, fired on each change. */
   onReadyCount?: (count: number) => void
+  onTunnelClosed?: (deviceId: string, tunnelId: string) => void
   /** Offer the push extension; the Server then forwards notifications to phones that are offline. */
   push?: boolean
   /** Fired when the Server accepts or drops the push extension on a new connection. */
@@ -66,6 +69,7 @@ export interface PushSendOptions {
 export type HostLinkStatus = 'stopped' | 'connecting' | 'online' | 'offline'
 
 interface Tunnel {
+  tunnelId: string
   connectionId: string
   deviceId: string
   identityKey: string
@@ -378,6 +382,7 @@ export class HostLink {
     if (!this.options.admits(clientDeviceId!, clientIdentityKey!)) { reject('NOT_PAIRED'); return }
     const { identity } = this.options
     this.tunnels.set(connectionId, {
+      tunnelId: crypto.randomUUID(),
       connectionId,
       deviceId: clientDeviceId!,
       identityKey: clientIdentityKey!,
@@ -447,7 +452,7 @@ export class HostLink {
       const controller = new AbortController()
       tunnel.calls.set(requestId, controller)
       try {
-        const result = await this.options.handle(method, params, { deviceId: tunnel.deviceId, signal: controller.signal })
+        const result = await this.options.handle(method, params, { deviceId: tunnel.deviceId, tunnelId: tunnel.tunnelId, signal: controller.signal })
         reply = createMessage('rpc.response', { requestId, result: result ?? null })
       } catch (error) {
         const code = typeof (error as { code?: unknown })?.code === 'string' ? (error as { code: string }).code : 'HOST_ERROR'
@@ -486,7 +491,10 @@ export class HostLink {
   private dropTunnel(tunnel: Tunnel, code: string | undefined): void {
     if (this.tunnels.get(tunnel.connectionId) !== tunnel) return
     this.tunnels.delete(tunnel.connectionId)
-    if (tunnel.stage === 'ready') this.options.onReadyCount?.(this.connectedDevices().length)
+    if (tunnel.stage === 'ready') {
+      this.options.onReadyCount?.(this.connectedDevices().length)
+      this.options.onTunnelClosed?.(tunnel.deviceId, tunnel.tunnelId)
+    }
     for (const controller of tunnel.calls.values()) controller.abort(new Error('The phone link closed.'))
     tunnel.calls.clear()
     tunnel.noise.destroy()
