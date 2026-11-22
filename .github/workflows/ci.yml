@@ -73,13 +73,15 @@ jobs:
           } >> "$GITHUB_ENV"
       - name: Build the release APK
         working-directory: android
-        run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
+        run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a
       - name: Checksum
         run: |
           version=$(node -p "require('./package.json').version")
           mkdir -p dist
           cp android/app/build/outputs/apk/release/app-release.apk "dist/godbot-$version.apk"
           (cd dist && sha256sum "godbot-$version.apk" > "godbot-$version.apk.sha256")
+          # The relay serves this copy with Content-Encoding: gzip to clients that accept it.
+          gzip -9 -k -n "dist/godbot-$version.apk"
       - uses: actions/upload-artifact@v4
         with:
           name: godbot-android
