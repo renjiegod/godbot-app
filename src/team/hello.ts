@@ -33,7 +33,13 @@ export function checkHello(answer: unknown): HelloVerdict {
   const hello = answer as Partial<Hello>
   const name = hello.plugin?.name
   if (typeof name === 'string' && name !== GODBOT_PLUGIN) return { ok: false, reason: 'not-godbot', name }
-  if (typeof hello.api === 'number' && SUPPORTED_API.includes(hello.api)) return { ok: true }
+  if (name !== GODBOT_PLUGIN) return { ok: false, reason: 'update-godbot' }
+  if (typeof hello.api === 'number' && SUPPORTED_API.includes(hello.api)) {
+    if (typeof hello.boot !== 'string' || hello.boot === '' || typeof hello.seq !== 'number' || !Number.isSafeInteger(hello.seq) || hello.seq < 0 || !Array.isArray(hello.capabilities)) {
+      return { ok: false, reason: 'update-godbot' }
+    }
+    return { ok: true }
+  }
   const newest = Math.max(...SUPPORTED_API)
   if (typeof hello.apiMin === 'number' && hello.apiMin > newest) return { ok: false, reason: 'update-app' }
   return { ok: false, reason: 'update-godbot' }

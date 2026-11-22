@@ -2,19 +2,19 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack'
 import { useNavigation, type NavigationProp, type ParamListBase } from '@react-navigation/native'
 import { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, Dimensions, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
+import { ActivityIndicator, Alert, Image, Platform, Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native'
 import * as Notifications from 'expo-notifications'
 import { targetOf } from '../team/push-payload.ts'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as SecureStore from 'expo-secure-store'
 import { onPrefsChange, readPrefs } from '../store.ts'
 import { Drawer, useDrawer } from './Drawer.tsx'
-import { useTeam } from '../team/context.tsx'
+import { DEMO, useTeam } from '../team/context.tsx'
 import { ErrorBoundary } from '../ui/error-boundary.tsx'
-import { t } from '../ui/i18n.ts'
+import { hostText, t } from '../ui/i18n.ts'
 import { shadow, type as typeScale, useTheme } from '../ui/tokens.ts'
 import { Avatar, RoomAvatar } from '../ui/marks.tsx'
-import { GearIcon, PeopleIcon, PlusIcon, SearchIcon, SidebarIcon, SideIcon } from '../ui/icons.tsx'
+import { ChevronRightIcon, ClockIcon, FolderIcon, GearIcon, PlusIcon, SearchIcon, SidebarIcon, SideIcon } from '../ui/icons.tsx'
 import { ChatView, prefetchChat } from '../screens/Chat.tsx'
 import { NeedsYou } from '../screens/NeedsYou.tsx'
 import { Settings } from '../screens/Settings.tsx'
@@ -27,49 +27,71 @@ import type { Bot, Room } from '../connection.ts'
 import { pendingCountOf } from './pending.ts'
 import { activeChatTarget, openChat } from './open-chat.ts'
 import { Sheet, SheetHeader } from './sheet.tsx'
+import { SidebarMenu, type SidebarMenuView } from './sidebar-menu.tsx'
+import { lastChatKey, lastChatOf, primaryBot, type RosterEntry, type RosterSection } from './sidebar-roster.ts'
 
 const Stack = createNativeStackNavigator()
-const LAST_KEY = 'godbot.lastChat'
 
-// Drawer content = the desktop sidebar as a drawer: "Needs you" row on top when
-// anything is pending, the team list, and a footer with the You mark + gear.
 function DrawerContent() {
   const { p } = useTheme()
-  const { team } = useTeam()
+  const { team, computer, online, error, call } = useTeam()
   const insets = useSafeAreaInsets()
   const navigation = useNavigation<NavigationProp<ParamListBase>>()
   const drawer = useDrawer()
   const pending = pendingCountOf(team)
-  const fallbackId = (team?.bots?.find(b => b.id === team?.mainBotId) ?? team?.bots?.[0])?.id
+  const fallbackId = (primaryBot(team) ?? team?.bots?.[0])?.id
   const [searching, setSearching] = useState(false)
   const [query, setQuery] = useState('')
-  const [newOpen, setNewOpen] = useState(false)
-  const create = (screen: 'NewBot' | 'NewGroup') => { setNewOpen(false); drawer.close(); navigation.navigate(screen) }
+  const [menu, setMenu] = useState<SidebarMenuView | null>(null)
+  const canWrite = online && team !== null && !team.readOnly
+  const writeError = (cause: unknown) => Alert.alert(t('Error'), hostText(cause instanceof Error ? cause.message : String(cause)))
+  const openScreen = (screen: string, params?: object) => { setMenu(null); drawer.close(); navigation.navigate(screen, params) }
+  const showSettings = (entry: RosterEntry) => {
+    if (entry.kind === 'bot') openScreen('BotEdit', { botId: entry.item.id })
+    else openScreen('GroupSettings', { roomId: entry.item.id })
+  }
   // The chat on screen is marked in the list, as the desktop marks its open chat. The
   // drawer sits outside the navigator, so it follows the container's own state.
-  const [current, setCurrent] = useState<string | undefined>(undefined)
+  const [current, setCurrent] = useState<ChatTarget | undefined>(undefined)
   useEffect(() => {
-    const update = () => setCurrent(activeChatTarget(navigation.getState(), fallbackId)?.id)
+    const update = () => setCurrent(activeChatTarget(navigation.getState(), fallbackId))
     update()
     return navigation.addListener('state', update)
   }, [navigation, fallbackId])
   // A chat replaces the one on screen; nothing stays stacked under it. Needs you and
   // Settings slide up over the chat and go back down to it.
-  const open = (target: ChatTarget | { kind: 'needs' } | { kind: 'settings' }) => {
+  const open = async (target: ChatTarget) => {
+    const item = target.kind === 'bot' ? team?.bots.find(bot => bot.id === target.id) : team?.rooms?.find(room => room.id === target.id)
+    if (item?.hidden === true && searching && query.trim() !== '' && canWrite) {
+      try { await call('set-flags', { id: target.id, hidden: false }) }
+      catch (cause) { writeError(cause); return }
+    }
+    setSearching(false)
+    setQuery('')
     drawer.close()
-    if (target.kind === 'needs') navigation.navigate('Needs')
-    else if (target.kind === 'settings') navigation.navigate('Settings')
-    else openChat(navigation, target)
+    openChat(navigation, target)
   }
+  const toggleSection = (section: RosterSection) => {
+    if (canWrite) void call('section-save', { id: section.id, collapsed: section.collapsed !== true }).catch(writeError)
+  }
+  const linkStatus = online ? t('Connected') : error ?? t(team === null ? 'Connecting…' : 'Reconnecting…')
+  const hostName = computer?.name || computer?.server
+  const hostId = computer?.hostDeviceId.slice(-8)
   return (
     <View style={{ flex: 1, backgroundColor: p.sidebar }}>
-      {/* The desktop sidebar's head: the product name, search and New. */}
       <View style={[styles.drawerHead, { paddingTop: insets.top + 6 }]}>
-        <Text style={{ color: p.ink, fontSize: 17, fontWeight: '600', flex: 1 }}>Godbot</Text>
+        <View style={styles.brand}>
+          <Image source={require('../../assets/favicon.png')} style={{ width: 22, height: 22 }} />
+          <Text style={{ color: p.ink, fontSize: 16, fontWeight: '600', flexShrink: 1 }} numberOfLines={1}>Godbot</Text>
+        </View>
+        <Pressable accessibilityRole="button" accessibilityLabel={t('New section')} disabled={!canWrite} onPress={() => setMenu({ kind: 'name' })}
+          style={[styles.round, { borderColor: p.line, opacity: canWrite ? 1 : 0.45 }]}>
+          <FolderIcon size={18} />
+        </Pressable>
         <Pressable accessibilityRole="button" accessibilityLabel={t('Search')} onPress={() => setSearching(on => !on)} hitSlop={4} style={[styles.round, { borderColor: p.line, backgroundColor: p.card }]}>
           <SearchIcon size={16} color={p.ink2} />
         </Pressable>
-        <Pressable accessibilityRole="button" accessibilityLabel={t('New')} onPress={() => setNewOpen(true)} hitSlop={4} style={[styles.round, { borderColor: p.line, backgroundColor: p.card }]}>
+        <Pressable accessibilityRole="button" accessibilityLabel={t('New')} onPress={() => setMenu({ kind: 'new' })} hitSlop={4} style={[styles.round, { borderColor: p.line, backgroundColor: p.card }]}>
           <PlusIcon size={16} color={p.ink2} />
         </Pressable>
       </View>
@@ -81,33 +103,35 @@ function DrawerContent() {
         </View>
       ) : null}
       {pending > 0 ? (
-        <Pressable accessibilityRole="button" onPress={() => open({ kind: 'needs' })}
+        <Pressable accessibilityRole="button" onPress={() => openScreen('Needs')}
           style={({ pressed }) => [styles.needsRow, { backgroundColor: pressed ? p.hover : 'transparent' }]}>
           <Text style={[typeScale.rowName, { color: p.accent, flex: 1 }]}>{t('Needs you')}</Text>
           <View style={[styles.badge, { backgroundColor: p.accent }]}><Text style={{ color: p.accentInk, fontSize: 12, fontWeight: '600' }}>{pending}</Text></View>
         </Pressable>
       ) : null}
       <View style={{ flex: 1 }}>
-        <TeamList onOpen={open} query={searching ? query : ''} current={current} />
+        <TeamList onOpen={target => void open(target)} onOptions={entry => setMenu({ kind: 'entry', entry })}
+          onSection={section => setMenu({ kind: 'section', section })} onToggleSection={toggleSection}
+          query={searching ? query : ''} current={current} />
       </View>
-      <Modal visible={newOpen} transparent animationType="fade" onRequestClose={() => setNewOpen(false)}>
-        <Pressable style={styles.sheetScrim} onPress={() => setNewOpen(false)} accessibilityLabel={t('Close')}>
-          <View style={[styles.newSheet, { backgroundColor: p.card, borderColor: p.line, marginBottom: insets.bottom + 12 }, shadow(3)]}>
-            <Pressable accessibilityRole="button" onPress={() => create('NewBot')} style={({ pressed }) => [styles.newRow, pressed && { backgroundColor: p.hover }]}>
-              <View style={[styles.newIcon, { backgroundColor: p.hover }]}><PlusIcon size={18} color={p.ink} /></View>
-              <Text style={[typeScale.settingsRow, { color: p.ink }]}>{t('Create new Bot')}</Text>
-            </Pressable>
-            <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: p.line, marginLeft: 64 }} />
-            <Pressable accessibilityRole="button" onPress={() => create('NewGroup')} style={({ pressed }) => [styles.newRow, pressed && { backgroundColor: p.hover }]}>
-              <View style={[styles.newIcon, { backgroundColor: p.hover }]}><PeopleIcon size={18} color={p.ink} /></View>
-              <Text style={[typeScale.settingsRow, { color: p.ink }]}>{t('Create group chat')}</Text>
-            </Pressable>
-          </View>
-        </Pressable>
-      </Modal>
+      {menu && <SidebarMenu key={menu.kind} menu={menu} onChange={setMenu}
+        onCreate={openScreen} onSettings={showSettings} />}
       <View style={[styles.foot, { paddingBottom: insets.bottom + 8 }]}>
-        <Pressable accessibilityRole="button" accessibilityLabel={t('Settings')} onPress={() => open({ kind: 'settings' })} hitSlop={4} style={[styles.round, { borderColor: p.line, backgroundColor: p.card }]}>
+        <Pressable accessibilityRole="button" accessibilityLabel={t('Settings')} onPress={() => openScreen('Settings')} hitSlop={4} style={[styles.round, { borderColor: p.line, backgroundColor: p.card }]}>
           <GearIcon size={18} color={p.ink2} />
+        </Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={[t('Godbot teams'), hostName, hostId, linkStatus].filter(Boolean).join(', ')}
+          onPress={() => openScreen('Settings', { screen: 'Computers', initial: false })} style={styles.host}>
+          <View style={[styles.hostDot, { backgroundColor: online ? p.green : p.ink3 }]} />
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={[typeScale.small, { color: p.ink }]} numberOfLines={1}>{hostName ?? t('Godbot teams')}</Text>
+            <Text style={[typeScale.caption, { color: p.ink2 }]} numberOfLines={error ? 2 : 1}>{!DEMO ? [hostId, linkStatus].filter(Boolean).join(' · ') : linkStatus}</Text>
+          </View>
+          <ChevronRightIcon size={14} />
+        </Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={t('Automation tasks')} onPress={() => openScreen('Schedules')}
+          style={[styles.round, { borderColor: p.line, backgroundColor: p.card }]}>
+          <ClockIcon size={18} />
         </Pressable>
       </View>
     </View>
@@ -126,7 +150,7 @@ function Pill({ title, bot, room, bots }: { title: string; bot?: Parameters<type
 
 function Header({ title, bot, room, bots = [], onMenu, onPill, onSide }: { title: string; bot?: Parameters<typeof Avatar>[0]['bot']; room?: Room; bots?: Bot[]; onMenu: () => void; onPill?: () => void; onSide?: () => void }) {
   const { p } = useTheme()
-  const { team, online } = useTeam()
+  const { team, online, error } = useTeam()
   const pending = pendingCountOf(team) > 0
   const insets = useSafeAreaInsets()
   // The link dropped after the team loaded: the screen keeps what it shows and says so.
@@ -153,7 +177,7 @@ function Header({ title, bot, room, bots = [], onMenu, onPill, onSide }: { title
     {reconnecting ? (
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingBottom: 6 }} accessibilityRole="alert">
         <ActivityIndicator size="small" color={p.ink3} />
-        <Text style={[typeScale.caption, { color: p.ink3 }]}>{t('Reconnecting…')}</Text>
+        <Text style={[typeScale.caption, { color: p.ink2, flexShrink: 1 }]}>{error ?? t('Reconnecting…')}</Text>
       </View>
     ) : null}
     </View>
@@ -167,20 +191,31 @@ function ChatScreenB({ route, navigation }: any) {
   const params = route.params as ChatTarget | undefined
   // On launch the saved chat is read while the team state is still on its way.
   useEffect(() => { if (linked === true && team === null && params !== undefined) prefetchChat(call, computer?.hostDeviceId ?? '', params) }, [linked, team === null])
-  useEffect(() => { if (params) void SecureStore.setItemAsync(LAST_KEY, JSON.stringify(params)) }, [params])
-  const fallback = team?.bots?.find(b => b.id === team?.mainBotId) ?? team?.bots?.[0]
+  const key = lastChatKey(computer?.hostDeviceId ?? 'demo')
+  const fallback = primaryBot(team) ?? team?.bots?.[0]
   const kind = params?.kind ?? 'bot'
   const id = params?.id ?? fallback?.id ?? ''
   const bot = kind === 'bot' ? team?.bots?.find(b => b.id === id) : undefined
   const room = kind === 'room' ? team?.rooms?.find(r => r.id === id) : undefined
+  const readOnlyPart = params?.readOnlyPart
+  const partsRunning = team?.partsRunning
+  useEffect(() => {
+    if (readOnlyPart !== undefined && readOnlyPart === bot?.sessionId && partsRunning !== undefined && partsRunning[readOnlyPart] !== true) {
+      navigation.setParams({ readOnlyPart: undefined })
+    }
+  }, [readOnlyPart, bot?.sessionId, partsRunning, navigation])
   // A saved chat that the team no longer has is dropped and falls back to the
   // first Main Bot instead of opening an empty screen.
   const missing = team !== null && params !== undefined && ((kind === 'bot' && bot === undefined) || (kind === 'room' && room === undefined))
   useEffect(() => {
-    if (!missing) return
-    void SecureStore.deleteItemAsync(LAST_KEY)
-    if (fallback !== undefined) navigation.setParams({ kind: 'bot', id: fallback.id })
-  }, [missing])
+    if (team === null || params === undefined) return
+    if (missing) {
+      if (fallback !== undefined) navigation.setParams({ kind: 'bot', id: fallback.id, readOnlyPart: undefined })
+      else void SecureStore.deleteItemAsync(key).catch(() => {})
+    } else {
+      void SecureStore.setItemAsync(key, JSON.stringify(params)).catch(() => {})
+    }
+  }, [team === null, key, params, missing, fallback?.id, navigation])
   const header = <Header title={bot?.name ?? room?.name ?? ''} bot={bot} room={room} bots={team?.bots ?? []} onMenu={() => drawer.open()} onPill={() => { if (bot) navigation.navigate('BotDetails', { botId: bot.id }); else if (room) navigation.navigate('GroupDetails', { roomId: room.id }) }} onSide={bot !== undefined && bot.sessionId !== undefined ? () => navigation.navigate('Side', { bot, sessionId: bot.sessionId }) : undefined} />
   if (team === null) return (
     <View style={{ flex: 1, backgroundColor: p.main }}>
@@ -194,8 +229,12 @@ function ChatScreenB({ route, navigation }: any) {
       </View>
     </View>
   )
-  const onMissing = () => { void SecureStore.deleteItemAsync(LAST_KEY); if (fallback !== undefined) navigation.setParams({ kind: 'bot', id: fallback.id }) }
-  return <ChatView key={`${computer?.hostDeviceId ?? ''}:${kind}:${id}`} bot={bot} room={room} header={header} onMissing={onMissing} />
+  const onMissing = () => {
+    if (fallback !== undefined) navigation.setParams({ kind: 'bot', id: fallback.id, readOnlyPart: undefined })
+    else void SecureStore.deleteItemAsync(key).catch(() => {})
+  }
+  const sessionReadOnly = readOnlyPart !== undefined && readOnlyPart === bot?.sessionId && partsRunning?.[readOnlyPart] === true
+  return <ChatView key={`${computer?.hostDeviceId ?? ''}:${kind}:${id}`} bot={bot} room={room} header={header} onMissing={onMissing} sessionReadOnly={sessionReadOnly} />
 }
 
 function NeedsSheet({ navigation }: any) {
@@ -246,12 +285,13 @@ const NOTICE_BANNER_KINDS = new Set(['question', 'approval', 'message', 'group',
 function NoticeBanner() {
   const { p } = useTheme()
   const { team, onFeed } = useTeam()
+  const { shown: drawerOpen } = useDrawer()
   const navigation = useNavigation<NavigationProp<ParamListBase>>()
   const insets = useSafeAreaInsets()
   const [notice, setNotice] = useState<{ text: string; target: ChatTarget; seq: number } | null>(null)
   const banners = useRef(true)
   const fallbackRef = useRef<string | undefined>(undefined)
-  fallbackRef.current = (team?.bots?.find(b => b.id === team?.mainBotId) ?? team?.bots?.[0])?.id
+  fallbackRef.current = (primaryBot(team) ?? team?.bots?.[0])?.id
   useEffect(() => {
     const read = () => void readPrefs().then(prefs => { banners.current = prefs.banners !== 'off' })
     read()
@@ -279,10 +319,10 @@ function NoticeBanner() {
       setTimeout(() => setNotice(current => (current?.seq === mine ? null : current)), 8000)
     })
   }, [onFeed, navigation])
-  if (notice === null) return null
+  if (notice === null || drawerOpen) return null
   return (
     <Pressable accessibilityRole="button" onPress={() => { openChat(navigation, notice.target); setNotice(null) }}
-      style={[{ position: 'absolute', top: insets.top + 8, left: 12, right: 12, zIndex: 10, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: p.card, borderColor: p.accent, borderWidth: 1 }, shadow(2)]}>
+      style={[{ position: 'absolute', top: insets.top + 58, left: 12, right: 12, zIndex: 10, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: p.card, borderColor: p.accent, borderWidth: 1 }, shadow(2)]}>
       <Text style={[typeScale.small, { color: p.ink }]} numberOfLines={2}>{notice.text}</Text>
     </Pressable>
   )
@@ -347,14 +387,17 @@ function Inner({ initial }: { initial: ChatTarget | null }) {
 
 export default function ShellB() {
   const { p } = useTheme()
-  const width = Math.min(Dimensions.get('window').width * 0.85, 340)
+  const { computer } = useTeam()
+  const { width: windowWidth } = useWindowDimensions()
+  const width = Math.min(Math.max(windowWidth * 0.85, windowWidth - 44), 340, windowWidth)
+  const key = lastChatKey(computer?.hostDeviceId ?? 'demo')
   // Render the navigator only once the saved chat is known, so it can start on it.
   const [saved, setSaved] = useState<ChatTarget | null | undefined>(undefined)
   useEffect(() => {
-    void SecureStore.getItemAsync(LAST_KEY).then(text => {
-      try { setSaved(text === null ? null : JSON.parse(text) as ChatTarget) } catch { setSaved(null) }
-    })
-  }, [])
+    let active = true
+    void SecureStore.getItemAsync(key).then(text => { if (active) setSaved(lastChatOf(text)) }, () => { if (active) setSaved(null) })
+    return () => { active = false }
+  }, [key])
   // The left edge swipe is the iOS back gesture on pushed screens, so the
   // drawer only claims it while the root Chat is on top. The shell sits
   // outside the navigator, so it tracks the top route through the container's
@@ -382,14 +425,12 @@ export default function ShellB() {
 const styles = StyleSheet.create({
   needsRow: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 12, marginBottom: 4, borderRadius: 10, paddingHorizontal: 12, height: 44 },
   badge: { minWidth: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
-  foot: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingTop: 8 },
-  drawerHead: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingBottom: 10 },
-  round: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth },
+  foot: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingTop: 6 },
+  host: { flex: 1, minWidth: 0, minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 4 },
+  hostDot: { width: 6, height: 6, borderRadius: 3 },
+  brand: { flex: 1, flexDirection: 'row', alignItems: 'center', minWidth: 0, gap: 5 },
+  drawerHead: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingBottom: 5 },
+  round: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth },
   search: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 14, marginBottom: 8, borderRadius: 10, paddingHorizontal: 10, height: 36 },
-  you: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 4, height: 44 },
-  sheetScrim: { flex: 1, backgroundColor: 'rgba(0,0,0,0.25)', justifyContent: 'flex-end' },
-  newSheet: { marginHorizontal: 12, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
-  newRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 56, paddingHorizontal: 14 },
-  newIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   pill: { flexDirection: 'row', alignItems: 'center', height: 40, borderRadius: 20, paddingHorizontal: 14, borderWidth: 0.5, maxWidth: '100%', ...shadow(1) },
 })

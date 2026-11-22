@@ -308,7 +308,7 @@ test('the beat also retries when the socket connects but the computer never answ
   })
   h.manager.holdForKeepAlive(A, phone)
   await settle()
-  assert.equal(h.manager.snapshot().client, h.clients[0])
+  assert.equal(h.manager.snapshot().client, undefined, 'the client is unavailable until hello passes')
   assert.equal(h.manager.snapshot().online, false)
 
   h.clients[0].frames += 1

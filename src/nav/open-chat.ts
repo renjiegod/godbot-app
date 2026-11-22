@@ -6,7 +6,10 @@ import type { ChatTarget } from '../screens/TeamList.tsx'
 // helpers like popTo. Dispatching StackActions.popTo works from both the container
 // and any screen or modal sheet inside the stack.
 export function openChat(navigation: { dispatch: (action: NavigationAction) => void }, target?: ChatTarget) {
-  navigation.dispatch(StackActions.popTo('Chat', target, target === undefined ? { merge: true } : undefined))
+  // PopTo merges explicit params into the screen's launch defaults. Clear any
+  // restored read-only session marker when the caller opens a regular chat.
+  const params = target === undefined ? undefined : { ...target, readOnlyPart: target.readOnlyPart }
+  navigation.dispatch(StackActions.popTo('Chat', params, params === undefined ? { merge: true } : undefined))
 }
 
 type StateLike = NavigationState | PartialState<NavigationState> | undefined

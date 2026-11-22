@@ -40,7 +40,7 @@ export type TickReason = 'beat' | 'start' | 'network' | 'screen'
 export interface LinkSnapshot {
   /** The computer the rest is about; null before anything held the link. */
   host: string | null
-  /** The encrypted link, once it is up (calls can go before the handshake answers). */
+  /** The encrypted link after the Godbot API handshake passes. */
   client: RpcClient | undefined
   /** The handshake passed: the computer runs a Godbot this app can talk to. */
   online: boolean
@@ -174,14 +174,13 @@ export function createLinkManager(deps: LinkDeps) {
       mine.client = client
       heard = { frames: deps.relayFramesReceived(client), at: deps.now() }
       probedAt = 0
-      // The screens read the team now, alongside the handshake: each is a round trip.
-      set({ client, online: false, error: null })
+      // Only expose a client to the screens once the paired host's Godbot API is verified.
       const answer = await deps.callBot<Hello>(client, 'hello', helloRequest()).catch(() => null)
       if (!current()) { void client.close(); return }
       attempt = null
       const verdict = checkHello(answer)
       if (!verdict.ok || answer === null) {
-        set({ client: undefined, online: false, error: helloError(verdict.ok ? { ok: false, reason: 'update-godbot' } : verdict) })
+        set({ hello: null, error: helloError(verdict.ok ? { ok: false, reason: 'update-godbot' } : verdict) })
         void client.close()
         // DS Bot on the other end will not turn into Godbot by retrying.
         if (!verdict.ok && verdict.reason === 'not-godbot') { set({ fatal: true }); return }
@@ -193,7 +192,7 @@ export function createLinkManager(deps: LinkDeps) {
       incompatible = false
       failStreak = 0
       nextAt = 0
-      set({ online: true, hello: answer, error: null })
+      set({ client, online: true, hello: answer, error: null })
       // Push: hand this computer the phone's key and tell the relay where to push.
       void deps.setupPush(client, computer.hostDeviceId).catch(() => {})
       const host = computer.hostDeviceId
@@ -373,7 +372,6 @@ export function createLinkManager(deps: LinkDeps) {
         if (now - attempt.at < CONNECT_STUCK_MS) return
         const stuck = attempt
         attempt = null
-        if (snap.client !== undefined) set({ client: undefined, online: false })
         void stuck.client?.close()
       } else if (snap.client !== undefined) {
         checkAlive(snap.client, now, urgent)

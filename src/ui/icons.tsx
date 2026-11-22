@@ -22,6 +22,16 @@ export function SidebarIcon({ size = 20, color }: IconProps) {
   return h(Svg, { width: size, height: size, viewBox: '0 0 20 20', fill: 'none', stroke: use(color, p.ink2), strokeWidth: 1.6 },
     h(Rect, { x: 3, y: 4, width: 14, height: 12, rx: 2.5 }), h(Path, { d: 'M8 4v12' }))
 }
+export function FolderIcon({ size = 20, color }: IconProps) {
+  const { p } = useTheme()
+  return h(Svg, { width: size, height: size, viewBox: '0 0 20 20', fill: 'none', stroke: use(color, p.ink2), strokeWidth: 1.5, strokeLinejoin: 'round' },
+    h(Path, { d: 'M2.5 6a2 2 0 0 1 2-2H8l2 2h5.5a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2z' }))
+}
+export function ClockIcon({ size = 20, color }: IconProps) {
+  const { p } = useTheme()
+  return h(Svg, { width: size, height: size, viewBox: '0 0 20 20', fill: 'none', stroke: use(color, p.ink2), strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round' },
+    h(Circle, { cx: 10, cy: 10, r: 7 }), h(Path, { d: 'M10 6v4l2.5 1.5' }))
+}
 export function SearchIcon({ size = 16, color }: IconProps) {
   const { p } = useTheme()
   return h(Svg, { width: size, height: size, viewBox: '0 0 20 20' },

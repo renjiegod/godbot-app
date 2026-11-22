@@ -3,6 +3,7 @@ import { registerHooks } from 'node:module'
 import { after, before, test } from 'node:test'
 import type { TeamState } from '../connection.ts'
 import { pendingCountOf } from '../nav/pending.ts'
+import { GODBOT_PLUGIN, type Hello } from './hello.ts'
 
 let hooks: ReturnType<typeof registerHooks> | undefined
 let useTeamLinkFn: any
@@ -74,9 +75,9 @@ after(() => {
 })
 
 function mountUseTeamLink(options: {
-  onStateCall: (payload: { since?: number; live?: string }) => Promise<TeamState>
+  onStateCall: (payload: { since?: number; live?: string; models?: string; sessionOrder?: boolean }) => Promise<TeamState>
   onCallBotState?: (endpoint: string, payload: unknown, state: unknown) => Promise<{ value: unknown; state?: TeamState }>
-  onHelloCall?: () => Promise<{ api: number | null; capabilities: string[]; boot: string; seq: number }>
+  onHelloCall?: () => Promise<Hello>
   onOpen?: (attempt: number) => void | Promise<void>
   onProbe?: (timeoutMs?: number) => void
 }) {
@@ -138,8 +139,8 @@ function mountUseTeamLink(options: {
       }
     },
     callBot: async (_client: unknown, endpoint: string, payload: unknown) => {
-      if (endpoint === 'state') return options.onStateCall(payload as { since?: number; live?: string })
-      if (endpoint === 'hello') return options.onHelloCall ? options.onHelloCall() : { api: 1, capabilities: [], boot: 'boot-1', seq: 0 }
+      if (endpoint === 'state') return options.onStateCall(payload as Parameters<typeof options.onStateCall>[0])
+      if (endpoint === 'hello') return options.onHelloCall ? options.onHelloCall() : { api: 1, capabilities: [], boot: 'boot-1', seq: 0, plugin: { name: GODBOT_PLUGIN } }
       if (endpoint === 'notices') return { reset: false, notices: [] }
       return {}
     },
@@ -306,7 +307,7 @@ test('useTeamLink reconciles settled approvals and browserHolds via refresh and 
   assert.equal(pendingCountOf(h.render().team), 0)
 })
 
-test('useTeamLink keeps connection retry timer when initial handshake fails before concurrent poll rejects', async (t) => {
+test('useTeamLink waits for a compatible Godbot before reading team state', async (t) => {
   const scheduled: { id: number; ms: number; run: () => void }[] = []
   const origSetTimeout = globalThis.setTimeout
   const origClearTimeout = globalThis.clearTimeout
@@ -334,19 +335,16 @@ test('useTeamLink keeps connection retry timer when initial handshake fails befo
   let openCount = 0
   let attempt = 0
   let stateCalls = 0
-  let rejectFirstState!: (err: Error) => void
+  let finishHello!: (answer: Hello) => void
   const h = mountUseTeamLink({
     onOpen() { openCount += 1 },
     async onHelloCall() {
       attempt += 1
-      if (attempt === 1) throw new Error('handshake failed')
-      return { api: 1, capabilities: [], boot: 'boot-1', seq: 0 }
+      if (attempt === 1) return new Promise(resolve => { finishHello = resolve })
+      return { api: 1, capabilities: [], boot: 'boot-1', seq: 0, plugin: { name: GODBOT_PLUGIN } }
     },
     async onStateCall() {
       stateCalls += 1
-      if (stateCalls === 1) {
-        return new Promise<TeamState>((_resolve, reject) => { rejectFirstState = reject })
-      }
       return { revision: 1, liveKey: 'ok', bots: [{ id: 'b1', name: 'Chief', sessionId: 's1' }], questions: {} }
     },
   })
@@ -354,15 +352,15 @@ test('useTeamLink keeps connection retry timer when initial handshake fails befo
   h.render()
   await new Promise(resolve => origSetTimeout(resolve, 20))
 
-  // First hello failed, so connect() scheduled a 2_000ms retry timer.
-  // Now the concurrent first poll rejects because the socket closed: it MUST NOT cancel the 2_000ms retry timer!
-  rejectFirstState(new Error('closed'))
+  assert.equal(stateCalls, 0)
+  await assert.rejects(h.render().call('state'), { code: 'link/offline' })
+  finishHello({ api: null, capabilities: [], boot: 'older-host', seq: 0, plugin: { name: GODBOT_PLUGIN } })
   await new Promise(resolve => origSetTimeout(resolve, 20))
 
   const retryEntry = scheduled.find(entry => entry.ms === 2_000)
   assert.ok(retryEntry, 'expected 2_000ms reconnect timer to be scheduled')
-  assert.equal(timers.get(retryEntry.id)?.cleared, false, 'failed concurrent poll must not cancel connect retry timer')
-  assert.equal(scheduled.some(entry => entry.ms === 15_000 && !timers.get(entry.id)?.cleared), false, 'closed handshake client must not schedule 15_000ms poll timer')
+  assert.equal(stateCalls, 0)
+  assert.equal(h.render().team, null)
 
   // Firing the retry timer reconnects and loads state.
   retryEntry.run()
@@ -371,6 +369,49 @@ test('useTeamLink keeps connection retry timer when initial handshake fails befo
   const reconnected = h.render()
   assert.equal(reconnected.online, true)
   assert.equal(reconnected.team?.revision, 1)
+  assert.equal(stateCalls, 1)
+})
+
+test('reconnect reconciles a restarted Godbot and reuses its catalog key in reads and writes', async (t) => {
+  let boot = 'before-restart'
+  let revision = 32
+  let modelsKey = 'first-catalog'
+  let writeState: unknown
+  const reads: unknown[] = []
+  const h = mountUseTeamLink({
+    onHelloCall: async () => ({ api: 1, capabilities: [], boot, seq: 0, plugin: { name: GODBOT_PLUGIN } }),
+    async onStateCall(payload) {
+      reads.push(payload)
+      return { revision, modelsKey, liveKey: boot, bots: [{ id: 'lead', name: boot }], questions: {} }
+    },
+    async onCallBotState(_endpoint, _payload, state) {
+      writeState = state
+      return { value: true }
+    },
+  })
+  t.after(h.cleanup)
+  h.render()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(h.render().team?.revision, 32)
+  assert.deepEqual(reads[0], { since: -1, avatars: 'ref', live: undefined, models: '', sessionOrder: true })
+
+  modelsKey = 'changed-catalog'
+  h.emit('revision')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(reads[1], { since: 32, avatars: 'ref', live: boot, models: 'first-catalog', sessionOrder: true })
+  assert.equal(h.render().team?.modelsKey, 'changed-catalog')
+  await h.render().call('set-flags', { botId: 'lead', pinned: true })
+  assert.deepEqual(writeState, { since: 32, avatars: 'ref', live: boot, models: 'changed-catalog', sessionOrder: true })
+
+  boot = 'after-restart'
+  revision = 1
+  modelsKey = 'restarted-catalog'
+  h.dropLink()
+  h.appState('active')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(reads[2], reads[0])
+  assert.equal(h.render().team?.revision, 1)
+  assert.equal(h.render().team?.bots[0].name, 'after-restart')
 })
 
 test('useTeamLink polls a new client while a read on the closed client is still pending', async (t) => {

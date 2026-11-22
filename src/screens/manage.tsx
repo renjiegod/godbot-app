@@ -2,9 +2,9 @@
 // Bot and group management screens, mirroring the desktop details drawer and
 // settings forms: Bot details, Edit Bot, Create Bot, group settings, and the
 // "new" sheet. Every write goes through the same endpoints the desktop calls.
-import { Children, Fragment, useCallback, useContext, useEffect, useState } from 'react'
+import { Children, Fragment, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { useIsFocused } from '@react-navigation/native'
-import { Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { Alert, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { confirmDanger, Sheet, SheetHeader, useInSheet } from '../nav/sheet.tsx'
 import { openChat } from '../nav/open-chat.ts'
@@ -14,14 +14,16 @@ import { ComputersCtx } from '../nav/computers.ts'
 import * as ImagePicker from 'expo-image-picker'
 import { useTeam } from '../team/context.tsx'
 import { memorySummaryText } from '../team/memory.ts'
+import { botPrivacyBlock, botSessions, isLocalModel, modelRoute, sessionFigures, sessionUsage, type SessionStats } from '../team/bot-details.ts'
+import { connectorRows } from '../team/connectors.ts'
 import { folderPlan, type FolderPlan, type FoldersView } from '../team/folders.ts'
 import { t, timeLabel, weekdayShort } from '../ui/i18n.ts'
-import { CheckIcon, ChevronLeftIcon, ChevronRightIcon, GearIcon } from '../ui/icons.tsx'
+import { CheckIcon, ChevronLeftIcon, ChevronRightIcon, GearIcon, PlusIcon } from '../ui/icons.tsx'
 import { Avatar, COLOR_PAINT, RoomAvatar } from '../ui/marks.tsx'
 import { inkColor, radius, shadow, type as typeScale, useTheme, type Palette } from '../ui/tokens.ts'
 import type { Bot, Room, TeamState } from '../connection.ts'
 import { capabilityStatusText } from '../team/capabilities.ts'
-import { ModelMenu, ModelPicker } from './model-menu.tsx'
+import { modelOf, ModelMenu, ModelPicker } from './model-menu.tsx'
 
 export const SHAPES = ['acorn', 'berry', 'bunny', 'gem', 'gumdrop', 'kitty', 'moon', 'peanut', 'star', 'wave']
 export const COLORS = ['black', 'brown', 'red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'violet', 'magenta', 'gray', 'aurora']
@@ -98,7 +100,9 @@ function Row({ label, hint, value, onPress, disabled, end }: { label: string; hi
   return <Pressable accessibilityRole="button" onPress={onPress} style={({ pressed }) => pressed ? { backgroundColor: p.hover } : null}>{body}</Pressable>
 }
 
-function Field({ label, value, placeholder, multiline, onSave }: { label: string; value?: string; placeholder?: string; multiline?: boolean; onSave: (next: string) => void }) {
+function Field({ label, value, placeholder, multiline, maxLength, editable = true, onSave }: {
+  label: string; value?: string; placeholder?: string; multiline?: boolean; maxLength?: number; editable?: boolean; onSave: (next: string) => void
+}) {
   const { p } = useTheme()
   const [draft, setDraft] = useState<string | null>(null)
   return (
@@ -110,9 +114,16 @@ function Field({ label, value, placeholder, multiline, onSave }: { label: string
           value={draft ?? value ?? ''}
           placeholder={placeholder}
           placeholderTextColor={p.ink3}
+          accessibilityLabel={label}
+          editable={editable}
+          maxLength={maxLength}
           multiline={multiline}
           onChangeText={setDraft}
-          onBlur={() => { const next = (draft ?? '').trim(); setDraft(null); if (next !== (value ?? '')) onSave(next) }}
+          onBlur={() => {
+            const next = draft?.trim()
+            setDraft(null)
+            if (next !== undefined && next !== (value ?? '')) onSave(next)
+          }}
         />
       </View>
     </View>
@@ -168,11 +179,11 @@ function useWrite(navigation: any) {
   const { call } = useTeam()
   const [error, setError] = useState<string | null>(null)
   const run = async (name: string, body: Record<string, unknown>, done?: (value: unknown) => void) => {
-    try { const value = await call(name, body); setError(null); done?.(value) }
+    try { const value = await call(name, body); setError(null); done?.(value); return true }
     catch (failure) {
       const code = (failure as { code?: string })?.code
-      if (code === 'unlock/canceled') return
-      setError((failure as Error)?.message ?? String(failure))
+      if (code !== 'unlock/canceled') setError((failure as Error)?.message ?? String(failure))
+      return false
     }
   }
   return { run, error }
@@ -197,57 +208,247 @@ function useOpenWhenListed(navigation: any) {
 
 export function BotDetails({ route, navigation }: any) {
   const { p, dark } = useTheme()
-  const { team } = useTeam()
+  const insets = useSafeAreaInsets()
+  const { team, online } = useTeam()
   const { run, error } = useWrite(navigation)
   const bot = botOf(team, route.params?.botId ?? '')
+  const stats = useDetailStats(bot)
   if (bot === undefined) return <Screen title=""><BackRow title="" onBack={() => navigation.goBack()} /></Screen>
-  const main = isMain(team, bot.id)
-  const permissions = (team as { permissions?: { options?: { value: string; name: string }[]; defaultPreset?: string } } | null)?.permissions
-  // The desktop's details pane (details-drawer.js): who it is, then model,
-  // permission, folder, instructions, memory, usage and scheduled tasks. Its gear
-  // opens the Bot settings.
+  const permissions = team?.permissions
+  const writable = online && !team?.readOnly
+  const save = (patch: Record<string, unknown>) => run('update-bot', { id: bot.id, ...patch })
   return (
     <Screen title={bot.name}>
       <View style={[styles.detailTop, { paddingTop: 8 }]}>
         <RoundButton label={t('Back')} onPress={() => navigation.goBack()}><ChevronLeftIcon color={p.ink2} /></RoundButton>
         <View style={{ flex: 1 }} />
-        <RoundButton label={t('Edit Bot')} onPress={() => navigation.navigate('BotEdit', { botId: bot.id })}><GearIcon size={18} color={p.ink2} /></RoundButton>
+        {writable ? <RoundButton label={t('Edit Bot')} onPress={() => navigation.navigate('BotEdit', { botId: bot.id })}><GearIcon size={18} color={p.ink2} /></RoundButton> : null}
       </View>
-      <ScrollView contentContainerStyle={{ paddingBottom: 40, paddingHorizontal: 18 }}>
-        <View style={{ alignItems: 'center', paddingTop: 4 }}>
-          <Avatar bot={bot} dark={dark} size={64} ring={p.main} main={main} />
-          <Text style={[typeScale.rowName, { color: p.ink, marginTop: 10, fontSize: 18 }]}>{bot.name}</Text>
-          {bot.role ? <Text style={[typeScale.caption, { color: p.ink3, marginTop: 2 }]}>{bot.role}</Text> : null}
-        </View>
-        <View style={[styles.tabs, { backgroundColor: p.hover }]}>
-          <View style={[styles.tab, { backgroundColor: p.card }]}><Text style={[typeScale.small, { color: p.ink, fontWeight: '500' }]}>{t('Details')}</Text></View>
-          <Pressable accessibilityRole="tab" onPress={() => navigation.navigate('BotBrowser', { bot })} style={styles.tab}><Text style={[typeScale.small, { color: p.ink2 }]}>{t('Browser')}</Text></Pressable>
-        </View>
-        {error ? <Text style={[typeScale.small, { color: p.danger, marginTop: 10 }]}>{error}</Text> : null}
-        <DetailTitle text={t('Model')} />
-        <ModelMenu bot={bot} onManage={() => navigation.navigate('Settings', { screen: 'Providers', initial: false })} />
-        {permissions?.options && permissions.options.length > 0 ? (
-          <>
-            <DetailTitle text={t('Permissions')} />
-            <PermissionPicker options={permissions.options} saved={bot.permission ?? permissions.defaultPreset} onPick={permission => void run('update-bot', { id: bot.id, permission })} />
-          </>
-        ) : null}
-        <DetailTitle text={t('Working folder')} />
-        <Pressable accessibilityRole="button" onPress={() => navigation.navigate('Folder', { current: bot.workDir, onPick: 'bot', botId: bot.id })}
-          style={[styles.dropdown, { backgroundColor: p.card, borderColor: p.line }]}>
-          <Text style={[typeScale.settingsRow, { color: p.ink, flex: 1 }]} numberOfLines={1}>{bot.workDir ? bot.workDir.split(/[\\/]/).filter(Boolean).pop() : t('Team workspace')}</Text>
-          <Text style={{ color: p.ink3, fontSize: 12 }}>⌄</Text>
-        </Pressable>
-        {bot.instructions
-          ? <Text style={[typeScale.small, { color: p.ink2, marginTop: 14 }]} numberOfLines={5}>{bot.instructions}</Text>
-          : <Pressable accessibilityRole="button" onPress={() => navigation.navigate('BotEdit', { botId: bot.id })} style={{ alignItems: 'center', paddingVertical: 14 }}>
-              <Text style={[typeScale.small, { color: p.ink3 }]}>{t('Add instructions in Bot settings')}</Text>
-            </Pressable>}
-        {team?.memory === false ? null : <MemorySummary bot={bot} onOpen={() => navigation.navigate('Memory', { id: bot.id, name: bot.name, group: false })} />}
-        <UsageSummary bot={bot} onOpen={() => navigation.navigate('Usage', { botId: bot.id, name: bot.name, sessionId: bot.sessionId })} />
-        <ScheduleSummary bot={bot} onOpen={() => navigation.navigate('Schedules', { botId: bot.id, name: bot.name, sessionId: bot.sessionId })} />
-      </ScrollView>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: insets.bottom + 24, paddingHorizontal: 18 }}>
+          <View style={styles.detailIdentity}>
+            <Avatar bot={bot} dark={dark} size={64} ring={p.main} />
+            <DetailIdentity bot={bot} writable={writable} save={save} />
+          </View>
+          <View style={[styles.tabs, { backgroundColor: p.hover }]} accessibilityRole="tablist">
+            <View accessibilityRole="tab" accessibilityState={{ selected: true }} style={[styles.tab, { backgroundColor: p.card }]}><Text style={[typeScale.small, { color: p.ink, fontWeight: '500' }]}>{t('Details')}</Text></View>
+            <Pressable accessibilityRole="tab" onPress={() => navigation.navigate('BotBrowser', { bot })} style={styles.tab}><Text style={[typeScale.small, { color: p.ink2 }]}>{t('Browser')}</Text></Pressable>
+          </View>
+          {error ? <Text accessibilityRole="alert" style={[typeScale.small, { color: p.danger, marginTop: 10 }]}>{error}</Text> : null}
+          <DetailStats stats={stats} />
+          <DetailTitle text={t('Model')} />
+          <ModelMenu bot={bot} readOnly={!writable} onManage={() => navigation.navigate('Settings', { screen: 'Providers', initial: false })} />
+          <BotSessions key={bot.id} bot={bot} team={team} writable={writable} navigation={navigation} run={run} />
+          {permissions?.options && permissions.options.length > 0 ? (
+            <>
+              <DetailTitle text={t('Permissions')} />
+              <PermissionPicker options={permissions.options} saved={bot.permission ?? permissions.defaultPreset} repick={bot.permission === undefined} disabled={!writable} onPick={permission => void save({ permission })} />
+            </>
+          ) : null}
+          <BotConnectors bot={bot} team={team} writable={writable} run={run} />
+          <DetailTitle text={t('Working folder')} />
+          <BotFolder bot={bot} navigation={navigation} writable={writable} />
+          <DetailAbout key={bot.id} bot={bot} writable={writable} onSave={instructions => save({ instructions })} />
+          {team?.memory === false ? null : <MemorySummary bot={bot} onOpen={() => navigation.navigate('Memory', { id: bot.id, name: bot.name, group: false })} />}
+          <UsageSummary bot={bot} stats={stats} onOpen={() => navigation.navigate('Usage', { botId: bot.id, name: bot.name })} />
+          <ScheduleSummary bot={bot} onOpen={() => navigation.navigate('Schedules', { botId: bot.id, name: bot.name, sessionId: bot.sessionId })} />
+        </ScrollView>
+      </KeyboardAvoidingView>
     </Screen>
+  )
+}
+
+type ManageWrite = ReturnType<typeof useWrite>['run']
+
+function DetailIdentity({ bot, writable, save }: {
+  bot: Bot; writable: boolean; save: (patch: Record<string, unknown>) => Promise<boolean>
+}) {
+  const { p } = useTheme()
+  const [name, setName] = useState<string | null>(null)
+  const [role, setRole] = useState<string | null>(null)
+  const commitName = async () => {
+    const next = name?.trim()
+    if (next && next !== bot.name && !await save({ name: next })) return
+    setName(null)
+  }
+  const commitRole = async () => {
+    const next = role?.trim()
+    if (next !== undefined && next !== (bot.role ?? '') && !await save({ role: next })) return
+    setRole(null)
+  }
+  return (
+    <>
+      <TextInput
+        accessibilityLabel={t('Bot name')} editable={writable} value={name ?? bot.name} onChangeText={setName} onBlur={() => void commitName()}
+        style={[typeScale.rowName, styles.identityName, { color: p.ink }]} maxLength={40} selectTextOnFocus autoCorrect={false}
+        returnKeyType="done" submitBehavior="blurAndSubmit"
+      />
+      {writable || bot.role ? (
+        <TextInput accessibilityLabel={t('Label')} editable={writable} value={role ?? bot.role ?? ''} onChangeText={setRole} onBlur={() => void commitRole()}
+          placeholder={t('Add a label')} placeholderTextColor={p.ink3} style={[typeScale.caption, styles.identityRole, { color: p.ink2 }]}
+          maxLength={24} returnKeyType="done" submitBehavior="blurAndSubmit" />
+      ) : null}
+    </>
+  )
+}
+
+function DetailAbout({ bot, writable, onSave }: { bot: Bot; writable: boolean; onSave: (instructions: string) => Promise<boolean> }) {
+  const { p } = useTheme()
+  const [draft, setDraft] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const saved = bot.instructions ?? ''
+  const changed = draft !== null && draft.trim() !== saved
+  const commit = async () => {
+    if (!changed || saving) return
+    setSaving(true)
+    if (await onSave(draft.trim())) setDraft(null)
+    setSaving(false)
+  }
+  if (!writable && saved === '') return null
+  return (
+    <>
+      <DetailTitle text={t('About')} />
+      <TextInput
+        accessibilityLabel={t('Instructions')} editable={writable && !saving} value={draft ?? saved} onChangeText={setDraft}
+        placeholder={t('What this Bot is responsible for…')} placeholderTextColor={p.ink3} multiline
+        style={[typeScale.small, styles.aboutInput, { color: p.ink, borderColor: p.line, backgroundColor: p.card }]}
+      />
+      {changed && writable ? (
+        <Pressable accessibilityRole="button" accessibilityState={{ disabled: saving, busy: saving }} disabled={saving} onPress={() => void commit()}
+          style={[styles.inlineAction, { backgroundColor: p.accent, alignSelf: 'flex-end', marginTop: 8 }]}>
+          <Text style={[typeScale.small, { color: p.accentInk }]}>{t('Save')}</Text>
+        </Pressable>
+      ) : null}
+    </>
+  )
+}
+
+function BotFolder({ bot, navigation, writable }: { bot: Bot; navigation: any; writable: boolean }) {
+  const { p } = useTheme()
+  const folder = bot.workDir
+  const label = folder ? folder.split(/[\\/]/).filter(Boolean).pop() ?? folder : t('Team workspace')
+  const fixed = bot.accountProfileId !== undefined
+  return (
+    <>
+      <Pressable accessibilityRole="button" accessibilityState={{ disabled: !writable || fixed }} disabled={!writable || fixed}
+        onPress={() => navigation.navigate('Folder', { current: folder, onPick: 'bot', botId: bot.id })}
+        style={[styles.dropdown, { backgroundColor: p.card, borderColor: p.line }]}>
+        <Text style={[typeScale.settingsRow, { color: p.ink, flex: 1 }]} numberOfLines={1}>{label}</Text>
+        {writable && !fixed ? <ChevronRightIcon size={16} color={p.ink3} /> : null}
+      </Pressable>
+      {fixed ? <Text style={[typeScale.caption, { color: p.ink3, marginTop: 5 }]}>{t('Manage the sandbox account and its working folder in Godbot Web.')}</Text> : null}
+    </>
+  )
+}
+
+function BotSessions({ bot, team, writable, navigation, run }: { bot: Bot; team: TeamState | null; writable: boolean; navigation: any; run: ManageWrite }) {
+  const { p } = useTheme()
+  const { refresh } = useTeam()
+  const [pending, setPending] = useState<'new' | 'open' | null>(null)
+  const asked = useRef(false)
+  const [startingFrom, setStartingFrom] = useState<string | null>(null)
+  const current = bot.sessionId ?? bot.id
+  const state = team?.newSessions?.[bot.id]
+  const sessions = botSessions(bot, team)
+  const opening = state === 'opening' || pending === 'new' || startingFrom !== null
+  const startDisabled = !writable || opening || pending !== null || state === 'empty'
+  useEffect(() => {
+    if (startingFrom !== null && current !== startingFrom) {
+      setStartingFrom(null)
+      openChat(navigation, { kind: 'bot', id: bot.id })
+    }
+  }, [startingFrom, current, navigation, bot.id])
+  useEffect(() => {
+    if (startingFrom === null || startingFrom !== current || state === 'opening') return
+    const timer = setTimeout(() => {
+      setStartingFrom(null)
+      refresh?.()
+    }, 20_000)
+    return () => clearTimeout(timer)
+  }, [startingFrom, current, state, refresh])
+  const start = async () => {
+    if (startDisabled || asked.current) return
+    asked.current = true
+    setPending('new')
+    await run('bot-new-part', { botId: bot.id }, result => {
+      if (result === true) setStartingFrom(current)
+    })
+    setPending(null)
+    asked.current = false
+  }
+  const open = async (session: typeof sessions[number]) => {
+    if (!writable || opening || pending !== null || asked.current || session.current) return
+    asked.current = true
+    setPending('open')
+    await run('bot-open-part', { botId: bot.id, sessionId: session.id }, () => {
+      openChat(navigation, { kind: 'bot', id: bot.id, ...(session.running ? { readOnlyPart: session.id } : {}) })
+    })
+    setPending(null)
+    asked.current = false
+  }
+  return (
+    <>
+      <DetailTitle text={t('Sessions')} />
+      {writable ? (
+        <Pressable accessibilityRole="button" accessibilityLabel={t('New session')} accessibilityState={{ disabled: startDisabled, busy: opening }}
+          accessibilityHint={state === 'empty' ? t('This is already a new session. Send a message to begin.') : undefined}
+          disabled={startDisabled} onPress={() => void start()}
+          style={[styles.inlineAction, { backgroundColor: p.hover, marginBottom: 8, opacity: startDisabled ? 0.65 : 1 }]}>
+          <PlusIcon size={16} color={p.accent} />
+          <Text style={[typeScale.small, { color: p.ink }]}>{opening ? t('Starting…') : t('New session')}</Text>
+        </Pressable>
+      ) : null}
+      {sessions.some(session => session.running && !session.current) ? (
+        <Text style={[typeScale.caption, { color: p.ink2, marginBottom: 8 }]}>{t('A running session keeps using model calls in the background.')}</Text>
+      ) : null}
+      <View style={[styles.detailRows, { borderColor: p.line, backgroundColor: p.card }]}>
+        {sessions.map((session, index) => {
+          const label = session.fresh ? t('New session') : t('Session {number}', { number: session.number })
+          const meta = session.running ? t('Running') : session.current ? t('Current') : ''
+          const disabled = !writable || session.current || opening || pending !== null
+          return (
+            <Pressable key={session.id} accessibilityRole="button" accessibilityLabel={label} accessibilityHint={meta || undefined}
+              accessibilityState={{ disabled, selected: session.current }} disabled={disabled} onPress={() => void open(session)}
+              style={[styles.detailListRow, { backgroundColor: session.current ? p.hover : p.card, borderTopColor: p.line, borderTopWidth: index === 0 ? 0 : StyleSheet.hairlineWidth }]}>
+              <Text style={[typeScale.small, { color: p.ink, flex: 1 }]} numberOfLines={1}>{label}</Text>
+              {meta ? <Text style={[typeScale.caption, { color: session.running ? p.accent : p.ink3 }]}>{meta}</Text> : null}
+              {!disabled ? <ChevronRightIcon size={15} color={p.ink3} /> : null}
+            </Pressable>
+          )
+        })}
+      </View>
+    </>
+  )
+}
+
+function BotConnectors({ bot, team, writable, run }: { bot: Bot; team: TeamState | null; writable: boolean; run: ManageWrite }) {
+  const { p } = useTheme()
+  const [pending, setPending] = useState<string | null>(null)
+  const data = team?.connectors
+  const list = connectorRows(data).filter(connector => connector.state === 'ready')
+  const rows = [...list, ...(data?.mail?.accounts?.length ? [{ id: 'mail', name: t('Mailbox'), offFor: data.mail.offFor }] : [])]
+  if (rows.length === 0) return null
+  return (
+    <>
+      <DetailTitle text={t('Connectors')} />
+      <View style={[styles.detailRows, { borderColor: p.line, backgroundColor: p.card }]}>
+        {rows.map((row, index) => {
+          const offFor = row.offFor ?? []
+          const on = !offFor.includes(bot.id)
+          const change = async (activate: boolean) => {
+            setPending(row.id)
+            await run('connector-set', { id: row.id, offFor: activate ? offFor.filter(id => id !== bot.id) : [...offFor, bot.id] })
+            setPending(null)
+          }
+          return (
+            <Fragment key={row.id}>
+              {index > 0 ? <View style={[styles.divider, { backgroundColor: p.line }]} /> : null}
+              <SwitchRow label={row.name} on={on} disabled={!writable || pending !== null} onChange={value => void change(value)} />
+            </Fragment>
+          )
+        })}
+      </View>
+    </>
   )
 }
 
@@ -268,22 +469,21 @@ function DetailTitle({ text }: { text: string }) {
 
 const PRESET_LABELS: Record<string, string> = { 'read-only': 'Read only', 'workspace-write': 'Workspace', 'danger-full-access': 'Full access' }
 
-// The presets DeepSeek Harness offers, as one segmented choice (permission-picker.js);
-// a pick shows at once and the saved value catches up.
-function PermissionPicker({ options, saved, onPick }: { options: { value: string; name: string }[]; saved?: string; onPick: (value: string) => void }) {
+// An inherited preset can be saved explicitly, as on the Web.
+function PermissionPicker({ options, saved, repick, disabled, onPick }: {
+  options: { value: string; name: string }[]; saved?: string; repick: boolean; disabled: boolean; onPick: (value: string) => void
+}) {
   const { p } = useTheme()
-  const [pending, setPending] = useState<string | null>(null)
-  useEffect(() => { if (pending === saved) setPending(null) }, [saved, pending])
-  const current = pending ?? saved
   return (
     <View style={[styles.segments, { backgroundColor: p.hover }]} accessibilityRole="radiogroup">
       {options.map(option => {
-        const on = option.value === current
+        const on = option.value === saved
         const danger = option.value === 'danger-full-access'
         return (
-          <Pressable key={option.value} accessibilityRole="radio" accessibilityState={{ checked: on }} onPress={() => { if (!on) { setPending(option.value); onPick(option.value) } }}
+          <Pressable key={option.value} accessibilityRole="radio" accessibilityState={{ checked: on, disabled }} disabled={disabled}
+            onPress={() => { if (!on || repick) onPick(option.value) }}
             style={[styles.segment, on ? { backgroundColor: p.card } : null]}>
-            <Text style={[typeScale.small, { color: danger ? p.danger : on ? p.ink : p.ink2, fontWeight: on ? '500' : '400' }]} numberOfLines={1}>
+            <Text style={[typeScale.small, { color: danger ? p.danger : on ? p.ink : p.ink2, fontWeight: on ? '500' : '400', textAlign: 'center' }]}>
               {PRESET_LABELS[option.value] ? t(PRESET_LABELS[option.value]) : option.name}
             </Text>
           </Pressable>
@@ -319,28 +519,45 @@ function MemorySummary({ bot, onOpen }: { bot: Bot; onOpen: () => void }) {
 
 const formatTokens = (count: number) => (count >= 1e6 ? `${(count / 1e6).toFixed(1)}M` : count >= 1e3 ? `${(count / 1e3).toFixed(1)}K` : String(count))
 
-// text.js usageOf: every prompt-side bucket plus output, and the cache hit share.
-function UsageSummary({ bot, onOpen }: { bot: Bot; onOpen: () => void }) {
-  const { p } = useTheme()
-  const { call, team } = useTeam()
-  const [text, setText] = useState('')
+function useDetailStats(bot?: Bot) {
+  const { call, team, computer, hello, online } = useTeam()
+  const scope = `${computer?.hostDeviceId ?? ''}:${hello?.boot ?? ''}:${bot?.id ?? ''}:${bot?.sessionId ?? ''}`
+  const running = team?.partsRunning?.[bot?.sessionId ?? ''] === true
+  const [read, setRead] = useState<{ scope: string; stats: SessionStats | null } | null>(null)
   useEffect(() => {
+    if (!online || bot === undefined) return
     let live = true
     call('run-stats', { botId: bot.id }).then(value => {
-      const usage = (value as { tokenUsage?: { uncachedInputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number; outputTokens?: number } } | null)?.tokenUsage
-      if (!live || !usage) return
-      const input = (usage.uncachedInputTokens ?? 0) + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0)
-      const output = usage.outputTokens ?? 0
-      setText(input + output === 0 ? '' : t('{tokens} tok · Cache hit {hit}%', { tokens: formatTokens(input + output), hit: input > 0 ? Math.round((usage.cacheReadTokens ?? 0) / input * 100) : 0 }))
+      if (live) setRead({ scope, stats: value as SessionStats | null })
     }).catch(() => {})
     return () => { live = false }
-  }, [bot.id, team?.revision])
-  // Godbot: shown also before the Bot used any tokens, so its usage page can always be opened.
+  }, [call, scope, running, online])
+  return read?.scope === scope ? read.stats : null
+}
+
+function DetailStats({ stats }: { stats: SessionStats | null }) {
+  const { p } = useTheme()
+  const { turns, speed, cacheHit, context } = sessionFigures(stats)
+  const labels = [
+    turns > 0 ? turns === 1 ? t('1 turn') : t('{count} turns', { count: turns }) : '',
+    speed !== null ? t('{speed} tok/s', { speed }) : '',
+    cacheHit !== null ? t('Cache hit {hit}%', { hit: cacheHit }) : '',
+    context !== null ? t('Context {percent}%', { percent: context }) : '',
+  ].filter(Boolean)
+  return labels.length === 0 ? null : (
+    <Text style={[typeScale.caption, { color: p.ink2, marginTop: 16, textAlign: 'center' }]}>{labels.join(' · ')}</Text>
+  )
+}
+
+function UsageSummary({ bot, stats, onOpen }: { bot: Bot; stats: SessionStats | null; onOpen: () => void }) {
+  const { p } = useTheme()
+  const { total, input, cacheRead } = sessionUsage(stats)
+  const text = total === 0 ? '' : t('{tokens} tok · Cache hit {hit}%', { tokens: formatTokens(total), hit: input > 0 ? Math.round(cacheRead / input * 100) : 0 })
   return (
     <>
       <DetailTitle text={t('Usage')} />
       <Pressable accessibilityRole="button" accessibilityLabel={t("{name}'s usage", { name: bot.name })} onPress={onOpen} style={{ flexDirection: 'row', justifyContent: 'space-between', minHeight: 32, alignItems: 'center' }}>
-        <Text style={[typeScale.small, { color: p.ink2 }]}>{bot.name}</Text>
+        <Text style={[typeScale.small, { color: p.ink2 }]}>{t('Current session')}</Text>
         <Text style={[typeScale.small, { color: text === '' ? p.ink3 : p.ink }]}>{text === '' ? t('No usage yet') : text}</Text>
       </Pressable>
     </>
@@ -350,13 +567,15 @@ function UsageSummary({ bot, onOpen }: { bot: Bot; onOpen: () => void }) {
 // schedules.js ScheduleSummary: the Bot's active tasks, or the way to add one.
 function ScheduleSummary({ bot, onOpen }: { bot: Bot; onOpen: () => void }) {
   const { p } = useTheme()
-  const { call, team } = useTeam()
+  const { call, online } = useTeam()
+  const focused = useIsFocused()
   const [view, setView] = useState<{ available?: boolean; tasks?: { id: string; botId?: string; status?: string; title?: string }[] } | null>(null)
   useEffect(() => {
+    if (!focused || !online) return
     let live = true
     call('schedules').then(value => { if (live) setView(value as typeof view) }).catch(() => {})
     return () => { live = false }
-  }, [team?.revision])
+  }, [call, focused, online, bot.sessionId])
   const tasks = view?.available ? (view.tasks ?? []).filter(task => task.botId === bot.id && task.status === 'active') : []
   return (
     <>
@@ -376,7 +595,7 @@ function ScheduleSummary({ bot, onOpen }: { bot: Bot; onOpen: () => void }) {
 
 // The desktop's BotCapabilitiesCard: packs first, then by name; a switch per
 // library item, with its status for this Bot while attached.
-function BotCapabilities({ bot, team, run }: { bot: Bot; team: TeamState | null; run: (endpoint: string, body: Record<string, unknown>) => Promise<void> }) {
+function BotCapabilities({ bot, team, run, writable = true }: { bot: Bot; team: TeamState | null; run: ManageWrite; writable?: boolean }) {
   const library = (team as { capabilities?: { name: string; kind?: string }[] } | null)?.capabilities ?? []
   if (library.length === 0) return null
   const items = [...library].sort((a, b) => Number(b.kind === 'pack') - Number(a.kind === 'pack') || a.name.localeCompare(b.name))
@@ -386,7 +605,7 @@ function BotCapabilities({ bot, team, run }: { bot: Bot; team: TeamState | null;
     <Section label={t('Capabilities')}>
       {items.map(item => (
         <SwitchRow key={item.name} label={item.name} hint={attached.has(item.name) ? capabilityStatusText(statuses[item.name]) : undefined}
-          on={attached.has(item.name)} onChange={next => void run('bot-capability', { botId: bot.id, name: item.name, attached: next })} />
+          on={attached.has(item.name)} disabled={!writable} onChange={next => void run('bot-capability', { botId: bot.id, name: item.name, attached: next })} />
       ))}
     </Section>
   )
@@ -396,28 +615,31 @@ function BotCapabilities({ bot, team, run }: { bot: Bot; team: TeamState | null;
 
 export function BotEdit({ route, navigation }: any) {
   const { p, dark } = useTheme()
-  const { team } = useTeam()
+  const { team, online } = useTeam()
   const { run, error } = useWrite(navigation)
   const open = useOpenWhenListed(navigation)
   const bot = botOf(team, route.params?.botId ?? '')
   if (bot === undefined) return <Screen title=""><BackRow title="" onBack={() => navigation.goBack()} /></Screen>
-  const save = (patch: Record<string, unknown>) => void run('update-bot', { id: bot.id, ...patch })
+  const writable = online && !team?.readOnly
+  const save = (patch: Record<string, unknown>) => (writable ? run('update-bot', { id: bot.id, ...patch }) : Promise.resolve(false))
   const shape = bot.avatar?.shape ?? 'star'
   const color = bot.color ?? 'blue'
   const main = isMain(team, bot.id)
+  const primary = team?.mainBotId === bot.id
+  const privacyBlock = botPrivacyBlock(bot, team)
   return (
     <Screen title={bot.name}>
       <BackRow title={t('Settings')} onBack={() => navigation.goBack()} />
-      <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 40 }}>
         <View style={{ alignItems: 'center', paddingTop: 12 }}>
           <Avatar bot={bot} dark={dark} size={56} ring={p.main} />
         </View>
-        {error ? <Text style={[typeScale.small, { color: p.danger, marginHorizontal: 18, marginTop: 10 }]}>{error}</Text> : null}
+        {error ? <Text accessibilityRole="alert" style={[typeScale.small, { color: p.danger, marginHorizontal: 18, marginTop: 10 }]}>{error}</Text> : null}
         <Section label={t('Profile')}>
-          <Field label={t('Name')} value={bot.name} placeholder="Bob" onSave={name => { if (name) save({ name }) }} />
-          <Field label={t('Label')} value={bot.role} placeholder={t('Research, admin…')} onSave={role => save({ role })} />
+          <Field label={t('Name')} value={bot.name} placeholder="Bob" maxLength={40} editable={writable} onSave={name => { if (name) void save({ name }) }} />
+          <Field label={t('Label')} value={bot.role} placeholder={t('Research, admin…')} maxLength={24} editable={writable} onSave={role => void save({ role })} />
         </Section>
-        <Section label={t('Character shape')}>
+        {writable ? <><Section label={t('Character shape')}>
           <PickGrid columns={5} ids={SHAPES} picked={shape} onPick={id => save({ avatar: { ...bot.avatar, shape: id } })}
             draw={(id, size) => <Avatar bot={{ ...bot, avatar: { ...bot.avatar, shape: id }, color } as Bot} dark={dark} size={size * 0.72} ring={p.card} />} />
         </Section>
@@ -428,30 +650,128 @@ export function BotEdit({ route, navigation }: any) {
         <Section label={t('Photo')}>
           <Row label={t('Upload photo')} onPress={() => { void pickPhoto().then(image => { if (image !== null) save({ avatar: { ...bot.avatar, image } }) }) }} />
           {bot.avatar?.image ? <Row label={t('Remove photo')} onPress={() => save({ avatar: { shape: bot.avatar?.shape } })} /> : null}
-        </Section>
+        </Section></> : null}
+        <BotRunMode bot={bot} team={team} writable={writable} save={save} />
         <Section label={t('Model')}>
-          <View style={{ padding: 12 }}><ModelMenu bot={bot} onManage={() => navigation.navigate('Settings', { screen: 'Providers', initial: false })} /></View>
+          <View style={{ padding: 12 }}><ModelMenu bot={bot} readOnly={!writable} onManage={() => navigation.navigate('Settings', { screen: 'Providers', initial: false })} /></View>
         </Section>
-        <Section label={t('Instructions')}>
-          <Field label={t('What this Bot does')} value={bot.instructions} multiline placeholder={t('What this Bot is responsible for…')} onSave={instructions => save({ instructions })} />
+        <Section label={t('Working folder')}>
+          <View style={{ padding: 12 }}><BotFolder bot={bot} navigation={navigation} writable={writable} /></View>
         </Section>
         <Section label={t('Privacy')}>
-          <SwitchRow label={t('Private')} hint={t('Other Bots cannot read its folder, memory or chats, and you approve what it shares with them.')}
-            on={bot.private === true} onChange={next => save({ private: next })} />
+          <SwitchRow label={t('Private')} hint={t(privacyBlock ?? 'Other Bots cannot read its folder, memory or chats, and you approve what it shares with them.')}
+            on={bot.private === true} disabled={!writable || privacyBlock !== undefined} onChange={next => void save({ private: next })} />
         </Section>
-        {bot.private === true ? null : (
-          <Section label={t('Main Bot')}>
-            <SwitchRow label={t('Main Bot')} hint={t('Can create and change Bots, and runs every group chat.')}
-              on={main} onChange={next => void run('set-main', { id: bot.id, main: next })} />
-          </Section>
-        )}
-        <BotCapabilities bot={bot} team={team} run={run} />
-        <Section label={t('Bot')}>
+        <Section label={t('Instructions')}>
+          <Field label={t('What this Bot does')} value={bot.instructions} multiline editable={writable} placeholder={t('What this Bot is responsible for…')} onSave={instructions => void save({ instructions })} />
+        </Section>
+        <BotCapabilities bot={bot} team={team} run={run} writable={writable} />
+        {team?.memory === false ? null : <Section label={t('Memory')}>
+          <Row label={t("Manage {name}'s memory", { name: bot.name })} onPress={() => navigation.navigate('Memory', { id: bot.id, name: bot.name })} />
+        </Section>}
+        <Section label={t('Scheduled tasks')}>
+          <Row label={t('Schedules')} onPress={() => navigation.navigate('Schedules', { botId: bot.id, name: bot.name, sessionId: bot.sessionId })} />
+        </Section>
+        <MainBotSettings bot={bot} team={team} writable={writable} run={run} />
+        {primary ? null : <Section label={t('Sidebar')}>
+          <SwitchRow label={t('Pin')} hint={t('Kept above the other chats.')} on={bot.pinned === true} disabled={!writable}
+            onChange={pinned => void run('set-flags', { id: bot.id, pinned })} />
+          {main ? null : <SwitchRow label={t('Hide from sidebar')} hint={t('Search still finds it.')} on={bot.hidden === true} disabled={!writable}
+            onChange={hidden => void run('set-flags', { id: bot.id, hidden })} />}
+        </Section>}
+        {writable && (bot.private !== true || !main) ? <Section label={t('Manage')}>
           {bot.private === true ? null : <Row label={t('Duplicate')} hint={t('A copy with the same job and model, and fresh memory.')} onPress={() => void run('duplicate-bot', { id: bot.id }, value => open({ kind: 'bot', id: (value as Bot).id }))} />}
-          <DangerRow label={t('Delete Bot')} confirm={t('Delete {name}?', { name: bot.name })} onConfirm={() => void run('delete-bot', { id: bot.id }, () => openChat(navigation))} />
-        </Section>
+          {main ? null : <DangerRow label={t('Delete Bot')} confirm={t('Delete {name}?', { name: bot.name })} onConfirm={() => void run('delete-bot', { id: bot.id }, () => openChat(navigation))} />}
+        </Section> : null}
       </ScrollView>
     </Screen>
+  )
+}
+
+function MainBotSettings({ bot, team, writable, run }: { bot: Bot; team: TeamState | null; writable: boolean; run: ManageWrite }) {
+  const [choosing, setChoosing] = useState(false)
+  const main = isMain(team, bot.id)
+  const onlyMain = main && mainsOf(team).size === 1
+  const replacements = (team?.bots ?? []).filter(candidate => candidate.id !== bot.id && candidate.private !== true)
+  return (
+    <Section label={t('Main Bot')}>
+      {onlyMain ? (
+        <Row label={t('Main Bot')} hint={t('Can create and change Bots, and runs every group chat.')}
+          value={writable && replacements.length > 0 ? t(choosing ? 'Cancel' : 'Change') : undefined}
+          onPress={writable && replacements.length > 0 ? () => setChoosing(!choosing) : undefined} />
+      ) : (
+        <SwitchRow label={t('Main Bot')} hint={t(bot.private === true ? 'A private Bot cannot be a Main Bot.' : 'Can create and change Bots, and runs every group chat.')}
+          on={main} disabled={!writable || bot.private === true} onChange={next => void run('set-main', { id: bot.id, main: next })} />
+      )}
+      {choosing && onlyMain && writable ? replacements.map(candidate => (
+        <Row key={candidate.id} label={candidate.name} onPress={() => void run('set-main', { id: candidate.id, main: true, replace: bot.id }, () => setChoosing(false))} />
+      )) : null}
+    </Section>
+  )
+}
+
+interface DiscoveredAgent { route: string; name: string; accountProfileId?: string; sandbox?: boolean; signedIn?: boolean | null }
+
+function BotRunMode({ bot, team, writable, save }: {
+  bot: Bot; team: TeamState | null; writable: boolean; save: (patch: Record<string, unknown>) => Promise<boolean>
+}) {
+  const { call } = useTeam()
+  const [choice, setChoice] = useState<'local' | 'model' | null>(null)
+  const [agents, setAgents] = useState<DiscoveredAgent[] | null>(null)
+  const [agentError, setAgentError] = useState<string | null>(null)
+  const engine = modelRoute(bot.model ?? bot.appliedModel)
+  const local = isLocalModel(engine)
+  const fixed = bot.accountProfileId !== undefined
+  const catalog = team?.models ?? []
+  const current = modelOf(bot, catalog)
+  const label = local ? current?.provider ?? bot.engine ?? engine : t('Godbot model')
+  useEffect(() => {
+    if (choice !== 'local') return
+    let live = true
+    setAgents(null)
+    setAgentError(null)
+    void call('local-agents').then(answer => {
+      if (!live) return
+      const view = answer as { detected?: DiscoveredAgent[]; custom?: DiscoveredAgent[] }
+      setAgents([...(view.detected ?? []), ...(view.custom ?? [])].filter(agent => !agent.sandbox && !agent.accountProfileId && agent.route !== engine))
+    }, failure => { if (live) setAgentError((failure as Error)?.message ?? String(failure)) })
+    return () => { live = false }
+  }, [call, choice, engine])
+  const pick = (ref: string, agent?: DiscoveredAgent) => {
+    const groups = (team?.rooms ?? []).filter(room => room.members?.includes(bot.id)).length
+    const note = groups === 0
+      ? t('Its own chat starts a new part with a handoff before the next turn.')
+      : t('Its own chat and {count} group chats each start a new part with a handoff before the next turn.', { count: groups })
+    const signedOut = agent?.signedIn === false ? t('{agent} is not signed in. Sign in first, or its turns fail.', { agent: agent.name }) : ''
+    const privacy = bot.private === true && agent ? t('The privacy rules of a private Bot do not cover the tools of a local agent.') : ''
+    Alert.alert(t('Change what {name} runs on?', { name: bot.name }), [note, signedOut, privacy].filter(Boolean).join('\n\n'), [
+      { text: t('Cancel'), style: 'cancel' },
+      { text: t('Change and start a new part'), onPress: () => {
+        void save({ model: ref, changeEngine: true }).then(ok => { if (ok) setChoice(null) })
+      } },
+    ])
+  }
+  return (
+    <Section label={t('Runs on')}>
+      <Row label={label} hint={t(fixed ? 'Manage the sandbox account and its working folder in Godbot Web.'
+        : local ? 'Answers through this CLI on your computer, with its own tools and sign-in.'
+          : "Answers with a model served by Godbot, with Godbot's tools.")}
+        value={writable && !fixed ? t(choice === null ? 'Change' : 'Cancel') : undefined}
+        onPress={writable && !fixed ? () => setChoice(choice === null ? local ? 'model' : 'local' : null) : undefined} />
+      {choice !== null ? (
+        <View style={{ paddingHorizontal: 12, paddingVertical: 8 }}>
+          <Segmented options={[{ id: 'model', label: t('Godbot model') }, { id: 'local', label: t('Local agent') }]} value={choice} onPick={id => setChoice(id === 'model' ? 'model' : 'local')} />
+          {choice === 'model' && local ? <View style={{ marginTop: 8 }}><ModelPicker hostedOnly onPick={ref => pick(ref)} /></View> : null}
+        </View>
+      ) : null}
+      {choice === 'local' ? (
+        agentError !== null ? <Row label={agentError} />
+          : agents === null ? <Row label={t('Looking for agent CLIs…')} />
+            : agents.length === 0 ? <Row label={t('No agent CLIs found')} />
+              : agents.map(agent => <Row key={agent.route} label={agent.name} hint={t(agent.signedIn === true ? 'Signed in' : agent.signedIn === false ? 'Not signed in' : 'Sign-in unknown')}
+                  onPress={() => pick(`${agent.route}/default`, agent)} />)
+      ) : null}
+    </Section>
   )
 }
 
@@ -822,9 +1142,26 @@ const UNITS: [string, number, string][] = [['minutes', 1, 'minutes'], ['hours', 
 
 const todayString = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
 
-const whenText = (task: { kind: string; time?: string; everySeconds?: number; minutes?: number; weekdays?: number[]; expression?: string; scheduledAt?: number }) => {
+interface ScheduledTask {
+  id: string
+  sessionId: string
+  botId?: string
+  roomId?: string
+  title: string
+  kind: string
+  status: string
+  state?: string
+  time?: string
+  everySeconds?: number
+  minutes?: number
+  weekdays?: number[]
+  expression?: string
+  scheduledAt?: number | string
+}
+
+const whenText = (task: ScheduledTask) => {
   switch (task.kind) {
-    case 'at': return t('Once, {time}', { time: timeLabel(task.scheduledAt ?? 0) })
+    case 'at': return t('Once, {time}', { time: timeLabel(typeof task.scheduledAt === 'number' ? task.scheduledAt : Date.parse(task.scheduledAt ?? '')) })
     case 'every': { const s = task.everySeconds ?? (task.minutes ?? 0) * 60; if (s % 86400 === 0) return s === 86400 ? t('Every day') : t('Every {count} days', { count: s / 86400 }); if (s % 3600 === 0) return s === 3600 ? t('Every hour') : t('Every {count} hours', { count: s / 3600 }); return t('Every {count} minutes', { count: Math.round(s / 60) }) }
     case 'daily': return t('Every day at {time}', { time: task.time ?? '' })
     case 'weekly': {
@@ -845,11 +1182,16 @@ const whenText = (task: { kind: string; time?: string; everySeconds?: number; mi
 
 export function Schedules({ route, navigation }: any) {
   const { p } = useTheme()
-  const { call } = useTeam()
+  const insets = useSafeAreaInsets()
+  const { call, team, online } = useTeam()
   const { run, error } = useWrite(navigation)
   const botId = String(route.params?.botId ?? '')
-  const sessionId = String(route.params?.sessionId ?? '')
-  const [tasks, setTasks] = useState<{ id: string; botId?: string; sessionId: string; title: string; prompt?: string; kind: string; status: string; time?: string; everySeconds?: number; weekdays?: number[]; expression?: string; scheduledAt?: number }[]>([])
+  const roomId = String(route.params?.roomId ?? '')
+  const scoped = botId !== '' || roomId !== ''
+  const [view, setView] = useState<{ available?: boolean; tasks?: ScheduledTask[] } | null>(null)
+  const [readError, setReadError] = useState<string | null>(null)
+  const [target, setTarget] = useState('')
+  const [choosing, setChoosing] = useState(false)
   const [title, setTitle] = useState('')
   const [prompt, setPrompt] = useState('')
   const [kind, setKind] = useState('daily')
@@ -860,39 +1202,67 @@ export function Schedules({ route, navigation }: any) {
   const [count, setCount] = useState('1')
   const [unit, setUnit] = useState('hours')
   const [adding, setAdding] = useState(false)
-  const load = () => void call('schedules').then(v => setTasks(((v as { tasks?: typeof tasks })?.tasks ?? []).filter(t2 => t2.botId === undefined || t2.botId === botId))).catch(() => {})
-  useEffect(() => { load() }, [botId])
+  const focused = useIsFocused()
+  useEffect(() => {
+    if (!focused || !online) return
+    let live = true
+    void call('schedules').then(value => {
+      if (!live) return
+      setView(value as typeof view)
+      setReadError(null)
+    }, failure => { if (live) setReadError((failure as Error)?.message ?? String(failure)) })
+    return () => { live = false }
+  }, [call, focused, online, botId, roomId])
+  const targets = [...(team?.bots ?? []), ...(team?.rooms ?? [])]
+  const selected = targets.find(entry => entry.id === (botId || roomId || target || team?.mainBotId)) ?? (scoped ? undefined : targets[0])
+  const writable = online && !team?.readOnly && view?.available !== false
+  const tasks = (view?.tasks ?? []).filter(task => !scoped || (botId ? task.botId === botId && !task.roomId : task.roomId === roomId && !task.botId))
+  const applySchedules = (value: unknown) => {
+    const next = value as typeof view
+    if (Array.isArray(next?.tasks)) setView(next)
+  }
   const when = () => {
     if (kind === 'at') { const at = new Date(`${atDate}T${atTime}`); return Number.isNaN(at.getTime()) ? null : { kind, at: at.toISOString() } }
     if (kind === 'every') { const minutes = Math.round(Number(count) * (UNITS.find(([id]) => id === unit)?.[1] ?? 60)); return minutes > 0 ? { kind, minutes } : null }
     return { kind, time, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, ...(kind === 'weekly' ? { weekdays } : {}) }
   }
-  const create = () => {
+  const create = async () => {
     const timing = when()
-    if (!title.trim() || !prompt.trim() || timing === null) return
+    if (!writable || adding || !selected || !title.trim() || !prompt.trim() || timing === null) return
     setAdding(true)
-    void run('schedule-create', { target: botId, title: title.trim(), prompt: prompt.trim(), when: timing }, () => { setTitle(''); setPrompt(''); load() })
+    await run('schedule-create', { target: selected.id, title: title.trim(), prompt: prompt.trim(), when: timing }, value => {
+      setTitle('')
+      setPrompt('')
+      applySchedules(value)
+    })
     setAdding(false)
   }
+  const canCreate = writable && selected !== undefined && title.trim() !== '' && prompt.trim() !== '' && !adding
   return (
     <Screen title={String(route.params?.name ?? '')}>
-      <BackRow title={t('Schedules')} onBack={() => navigation.goBack()} />
-      <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
+      <BackRow title={t(scoped ? 'Schedules' : 'Automation tasks')} onBack={() => navigation.goBack()} />
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
+        {error ?? readError ? <Text accessibilityRole="alert" style={[typeScale.caption, { color: p.danger, marginHorizontal: 18 }]}>{error ?? readError}</Text> : null}
         <Section label={t('Schedules')}>
           {tasks.map(task => (
             <View key={task.id} style={styles.row}>
               <View style={{ flex: 1 }}>
                 <Text style={[typeScale.settingsRow, { color: p.ink }]}>{task.title}</Text>
-                <Text style={[typeScale.small, { color: p.ink3, marginTop: 2 }]}>{whenText(task)}</Text>
+                <Text style={[typeScale.small, { color: p.ink3, marginTop: 2 }]}>
+                  {[scoped ? undefined : targets.find(entry => entry.id === (task.roomId ?? task.botId))?.name, whenText(task)].filter(Boolean).join(' · ')}
+                </Text>
               </View>
-              <Pressable accessibilityRole="button" accessibilityLabel={t('Delete task')} onPress={() => void run('schedule-delete', { sessionId: task.sessionId ?? sessionId, id: task.id }, load)} hitSlop={8}>
+              {writable && task.sessionId ? <Pressable accessibilityRole="button" accessibilityLabel={t('Delete task')}
+                onPress={() => confirmDanger(t('Delete task'), t('Delete'), () => void run('schedule-delete', { sessionId: task.sessionId, id: task.id }, applySchedules))} hitSlop={8}>
                 <Text style={{ color: p.ink3, fontSize: 17 }}>×</Text>
-              </Pressable>
+              </Pressable> : null}
             </View>
           ))}
-          {tasks.length === 0 ? <Row label={t('Nothing saved yet')} disabled /> : null}
+          {tasks.length === 0 ? <Row label={t(view?.available === false ? 'Switch on Automation tasks on the Plugins page in Settings.' : view === null && readError === null ? 'Loading…' : 'Nothing saved yet')} /> : null}
         </Section>
-        <Section label={t('New task')}>
+        {writable ? <><Section label={t('New task')}>
+          {scoped ? null : <Row label={t('Deliver to')} value={selected?.name} onPress={() => setChoosing(!choosing)} />}
+          {choosing ? targets.map(entry => <Row key={entry.id} label={entry.name} onPress={() => { setTarget(entry.id); setChoosing(false) }} />) : null}
           <View style={styles.row}><TextInput style={[typeScale.settingsRow, { color: p.ink, flex: 1 }]} value={title} onChangeText={setTitle} placeholder={t('Morning briefing')} placeholderTextColor={p.ink3} /></View>
           <View style={styles.row}><TextInput style={[typeScale.settingsRow, { color: p.ink, flex: 1, minHeight: 70, textAlignVertical: 'top' }]} value={prompt} onChangeText={setPrompt} placeholder={t('Sum up what changed since yesterday and what needs me today.')} placeholderTextColor={p.ink3} multiline /></View>
           <View style={{ paddingHorizontal: 16, paddingVertical: 10 }}>
@@ -930,11 +1300,10 @@ export function Schedules({ route, navigation }: any) {
           ) : null}
         </Section>
         <View style={{ paddingHorizontal: 18, marginTop: 14 }}>
-          {error !== null ? <Text style={[typeScale.caption, { color: p.danger, marginTop: 6 }]}>{error}</Text> : null}
-          <Pressable accessibilityRole="button" disabled={!title.trim() || !prompt.trim() || adding} onPress={create} style={({ pressed }) => [styles.cta, { backgroundColor: p.accent, opacity: !title.trim() || !prompt.trim() ? 0.5 : pressed ? 0.85 : 1 }]}>
+          <Pressable accessibilityRole="button" disabled={!canCreate} onPress={() => void create()} style={({ pressed }) => [styles.cta, { backgroundColor: p.accent, opacity: !canCreate ? 0.5 : pressed ? 0.85 : 1 }]}>
             <Text style={[typeScale.settingsRow, { color: p.accentInk, fontWeight: '600' }]}>{t('Create task')}</Text>
           </Pressable>
-        </View>
+        </View></> : null}
       </ScrollView>
     </Screen>
   )
@@ -1072,7 +1441,7 @@ export function Computers({ navigation }: any) {
     <Screen title="">
       <BackRow title={t('Computers')} onBack={() => navigation.goBack()} />
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
-        <Section label={t('Computers')}>
+        <Section label={t('Godbot teams')}>
           {list.map(item => {
             const active = item.hostDeviceId === computer?.hostDeviceId
             return (
@@ -1144,8 +1513,15 @@ export function Secrets({ navigation }: any) {
 
 const styles = StyleSheet.create({
   detailTop: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingBottom: 4 },
+  detailIdentity: { alignItems: 'center', paddingTop: 4, paddingBottom: 4 },
+  identityName: { width: '100%', textAlign: 'center', marginTop: 4, fontSize: 19, fontWeight: '600', paddingVertical: 6 },
+  identityRole: { width: '100%', textAlign: 'center', paddingVertical: 4 },
+  aboutInput: { minHeight: 88, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.card, paddingHorizontal: 12, paddingVertical: 10, textAlignVertical: 'top' },
+  inlineAction: { minHeight: 44, borderRadius: 10, paddingHorizontal: 12, flexDirection: 'row', gap: 8, alignItems: 'center' },
+  detailRows: { borderRadius: radius.card, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
+  detailListRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, minHeight: 44 },
   tabs: { flexDirection: 'row', alignSelf: 'center', borderRadius: 10, padding: 2, marginTop: 14 },
-  tab: { minWidth: 64, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12 },
+  tab: { minWidth: 72, minHeight: 44, borderRadius: 8, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12 },
   segments: { flexDirection: 'row', borderRadius: 10, padding: 2 },
   segment: { flex: 1, minHeight: 36, paddingVertical: 6, borderRadius: 8, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
   dropdown: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 48, borderRadius: radius.card, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 14 },

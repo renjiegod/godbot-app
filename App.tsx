@@ -137,7 +137,7 @@ function Boot() {
   if (bootError !== null) return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: p.main }}><Text style={{ color: p.danger }}>{bootError}</Text></View>
   if (identity === null || computer === undefined || lang === undefined || !seenReady) return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: p.main }}><ActivityIndicator color={p.accent} /></View>
   if (computer === null || adding) return <ThemeProvider><Pair identity={identity} offer={offer} onPaired={paired} onCancel={computer !== null ? () => { setAdding(false); setOffer(null) } : undefined} /></ThemeProvider>
-  return <ComputersCtx.Provider value={actions}><Linked computer={computer} identity={identity} lang={lang} /></ComputersCtx.Provider>
+  return <ComputersCtx.Provider value={actions}><Linked key={computer.hostDeviceId} computer={computer} identity={identity} lang={lang} /></ComputersCtx.Provider>
 }
 
 export default function App() {

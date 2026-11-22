@@ -38,12 +38,26 @@ const lookSvg = (look: { shape: string; color: string; image?: string }, dark: b
 }
 
 export function Mark({ look, dark, size = 24 }: { look: { shape: string; color: string; image?: string }; dark: boolean; size?: number }) {
+  const drawCharacter = () => <SvgXml xml={lookSvg(look, dark)} width={size} height={size} />
+  const svgPrefix = 'data:image/svg+xml;base64,'
+  if (typeof look.image === 'string' && look.image.startsWith(svgPrefix)) {
+    // Godbot's local-agent avatars can be SVG. Android's native Image decoder
+    // handles the raster avatars, but it needs the SVG renderer for these marks.
+    try {
+      const xml = atob(look.image.slice(svgPrefix.length))
+      return <View style={{ width: size, height: size, borderRadius: size / 2, overflow: 'hidden' }}>
+        <SvgXml xml={decodeURIComponent(escape(xml))} width={size} height={size} onError={() => {}} fallback={drawCharacter()} />
+      </View>
+    } catch {
+      return drawCharacter()
+    }
+  }
   if (typeof look.image === 'string' && look.image.startsWith('data:')) {
     return <Image source={{ uri: look.image }} style={{ width: size, height: size, borderRadius: size / 2 }} />
   }
   return (
     <View style={{ width: size, height: size }}>
-      <SvgXml xml={lookSvg(look, dark)} width={size} height={size} />
+      {drawCharacter()}
     </View>
   )
 }

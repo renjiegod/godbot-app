@@ -32,7 +32,13 @@ const TAG = Date.now().toString(36).slice(-5)
 // ---------------------------------------------------------------- the computer
 
 async function control(path, body) {
-  const response = await fetch(CONTROL + path, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  const headers = { connection: 'close' }
+  const request = body === undefined ? { headers } : {
+    method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify(body),
+  }
+  const response = await fetch(CONTROL + path, request).catch(error => {
+    throw new Error(`${body?.endpoint ?? path}: ${error.cause?.message ?? error.message}`, { cause: error })
+  })
   return response.json()
 }
 
@@ -137,8 +143,8 @@ async function openDrawer() {
 
 async function openChatOf(name) {
   await openDrawer()
-  // Below the header: the chat's own title stays in the hierarchy behind the drawer.
-  const row = await waitFor(nodes => lastWhere(nodes, node => node.text === name && node.bounds.x1 < 700 && node.bounds.y1 > 330), `${name} in the team list`)
+  // The chat's own title stays in the hierarchy behind the drawer.
+  const row = await waitFor(nodes => lastWhere(nodes, node => (node.text === name || node.desc === name || node.desc === `${name}, Main Bot`) && node.bounds.x1 < 700 && node.bounds.y1 > 230), `${name} in the team list`)
   tap(row)
   await sleep(1_000)
 }
@@ -215,9 +221,70 @@ async function main() {
   const botName = `E2E ${TAG}`
   const renamed = `E2E ${TAG} renamed`
 
+  await page('parity', 'section-save · update-bot · bot-new-part · bot-open-part', async (r) => {
+    const name = `Parity Bot ${TAG}`
+    await openDrawer()
+    await wait('the open team drawer', 'New section')
+    const section = await channel('section-save', { name: `Parity Group ${TAG}` })
+    const bot = await channel('create-bot', { name, sectionId: section.id })
+    const chat = () => channel('chat', { botId: bot.id })
+    const activeBot = async () => (await state()).bots.find(entry => entry.id === bot.id)
+    const first = (await activeBot()).sessionId
+    const firstMessage = `First session ${TAG}`
+    const secondMessage = `Second session ${TAG}`
+    const waitIdle = sessionId => until(state, team => team.partsRunning?.[sessionId] !== true && team.newSessions?.[bot.id] !== 'opening', 'the session done opening and running')
+    const seed = async (sessionId, marker) => {
+      await control('/reply', { text: `Reply to ${marker}` })
+      await channel('send', { sessionId, text: marker })
+      await until(chat, value => value.sessionId === sessionId && value.items.some(item => item.kind === 'user' && item.text === marker)
+        && value.items.some(item => item.kind === 'bot' && item.text === `Reply to ${marker}`), `the exchange in ${marker}`)
+      await waitIdle(sessionId)
+    }
+    try {
+      await wait('the section made on Web', section.name)
+      shot('parity-roster')
+      await tapOn('the shared section toggle', section.name)
+      await until(state, team => team.sections?.some(entry => entry.id === section.id && entry.collapsed), 'the Android section collapse on Web')
+      await channel('section-save', { id: section.id, collapsed: false })
+      r.read = 'Web group reflected on Android'
+      r.write = 'Android group collapse confirmed through Web'
+      await tapOn('the Bot in the shared section', name)
+      await seed(first, firstMessage)
+      await wait('the first transcript', firstMessage)
+      await openBotDetails(name)
+      const nameInput = await waitFor(nodes => field(nodes, 'Bot name'), 'the Bot name field')
+      await typeInto(nameInput, `${name} edited`, { clear: true, submit: true })
+      await until(activeBot, value => value?.name === `${name} edited`, 'the Android edit on the Web channel')
+      r.write += ', Android rename confirmed through Web'
+      await wait('the sessions heading', 'Sessions')
+      shot('parity-details')
+      tap(await scrollTo(nodes => find(nodes, 'Read only'), 'the host Read only permission'))
+      await until(activeBot, value => value?.permission === 'read-only', 'the Android permission change on Web')
+      r.write += ', Android permission change confirmed through Web'
+      await tapOn('the new session button', 'New session')
+      const next = await until(activeBot, value => value?.sessionId !== undefined && value.sessionId !== first, 'the new Android session on Web')
+      await waitIdle(next.sessionId)
+      await seed(next.sessionId, secondMessage)
+      await wait('the second transcript', secondMessage)
+      await openBotDetails(`${name} edited`)
+      await tapOn('the original session', 'Session 1')
+      await until(activeBot, value => value?.sessionId === first, 'the session opened on Android on Web')
+      r.write += ', Android session changes confirmed through Web'
+      await wait('the original transcript on Android', firstMessage)
+      await channel('bot-open-part', { botId: bot.id, sessionId: next.sessionId })
+      await wait('the session selected on Web, reflected on Android', secondMessage)
+      if (find(ui(), firstMessage)) throw new Error('The first session transcript is still visible after the Web switch')
+      r.read += ', Web session switch reflected on Android'
+    } finally {
+      await channel('delete-bot', { id: bot.id })
+      await channel('section-delete', { id: section.id })
+      await control('/reply', { text: 'Fixture acknowledged' })
+    }
+  })
+
   await page('bot', 'create-bot · update-bot · delete-bot', async (r) => {
     await openBotDetails(main.name)
-    await wait('the working folder', 'Working folder')
+    await scrollTo(nodes => find(nodes, 'Working folder'), 'the working folder')
     r.read = `${main.name}'s details (model, folder, memory, usage, schedules)`
     // Create a Bot, from the team list of the chat.
     await tapOn('Back', 'Back')
@@ -276,7 +343,7 @@ async function main() {
     const edited = `e2e note ${TAG} edited`
     const view = () => channel('memory-view', { botId: main.id })
     await openBotDetails(main.name)
-    await tapOn('the memory row', `Manage ${main.name}'s memory`)
+    tap(await scrollTo(nodes => find(nodes, `Manage ${main.name}'s memory`), 'the memory row'))
     await wait('the memory page', 'Ask memory')
     r.read = `memory-view (${(await view()).entries.length} entries)`
     await tapOn('Add', 'Add')
@@ -312,8 +379,15 @@ async function main() {
     const task = made.tasks.find(entry2 => entry2.title === title)
     await wait('the task in the list', title)
     shot('schedules')
+    await tapOn('back to Bot Details', 'Back')
+    await scrollTo(nodes => find(nodes, title), 'the task in Bot Details')
+    await tapOn('back to chat', 'Back')
+    await openDrawer()
+    await tapOn('team Automation tasks', 'Automation tasks')
+    await wait('the team schedule delivery selector', 'Deliver to')
     const del = await waitFor(nodes => { const row = find(nodes, title); return row ? findInRow(nodes, row, 'Delete task') : undefined }, 'the delete button')
     tap(del)
+    await alertTap('Delete')
     await until(tasks, v => !v.tasks.some(entry2 => entry2.id === task.id), 'the task deleted')
     r.write = `schedule-create "${title}" (daily 09:00), schedule-delete`
   })

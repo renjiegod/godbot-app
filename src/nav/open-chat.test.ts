@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { CommonActions, StackRouter, type NavigationAction } from '@react-navigation/routers'
 import { activeChatTarget, openChat } from './open-chat.ts'
+import type { ChatTarget } from './sidebar-roster.ts'
 
 const ROUTE_NAMES = ['Chat', 'BotDetails', 'BotEdit', 'GroupDetails', 'GroupSettings', 'Memory', 'Settings', 'Needs', 'NewBot', 'NewGroup']
 const SETTINGS_NAMES = ['SettingsHome', 'Computers', 'Providers']
@@ -19,13 +20,11 @@ const SETTINGS_OPTIONS = {
 // Simulates NavigationContainerRef outside Stack.Navigator: exposes dispatch and
 // CommonActions, never StackActions methods like popTo, and bubbles unhandled
 // child-stack actions up to the root stack router.
-function createContainer(initialParams?: { kind: 'bot' | 'room'; id: string }) {
+function createContainer(initialParams?: ChatTarget) {
   const rootRouter = StackRouter({})
   const settingsRouter = StackRouter({})
-  let state = rootRouter.getInitialState(OPTIONS)
-  if (initialParams !== undefined) {
-    state = { ...state, routes: [{ ...state.routes[0], params: initialParams }] }
-  }
+  const options = { ...OPTIONS, routeParamList: { Chat: initialParams } }
+  let state = rootRouter.getInitialState(options)
   return {
     getState: () => state,
     dispatch(action: NavigationAction) {
@@ -41,13 +40,13 @@ function createContainer(initialParams?: { kind: 'bot' | 'room'; id: string }) {
           return
         }
       }
-      const next = rootRouter.getStateForAction(state, action as any, OPTIONS)
-      if (next !== null) state = rootRouter.getRehydratedState(next, OPTIONS)
+      const next = rootRouter.getStateForAction(state, action as any, options)
+      if (next !== null) state = rootRouter.getRehydratedState(next, options)
     },
     openSettingsSubpage(name: string) {
       const next = rootRouter.getRehydratedState(
-        rootRouter.getStateForAction(state, CommonActions.navigate('Settings'), OPTIONS)!,
-        OPTIONS,
+        rootRouter.getStateForAction(state, CommonActions.navigate('Settings'), options)!,
+        options,
       )
       const childInit = settingsRouter.getInitialState(SETTINGS_OPTIONS)
       const childNext = settingsRouter.getRehydratedState(
@@ -68,7 +67,7 @@ test('openChat switches Bots in place from a container-level caller without popT
   openChat(container, { kind: 'bot', id: 'b-coder' })
   assert.equal(container.getState().routes.length, 1)
   assert.equal(container.getState().routes[0].name, 'Chat')
-  assert.deepEqual(container.getState().routes[0].params, { kind: 'bot', id: 'b-coder' })
+  assert.deepEqual(activeChatTarget(container.getState()), { kind: 'bot', id: 'b-coder' })
 })
 
 test('openChat pops pushed details screens and nested Settings sheets back to the target chat', () => {
@@ -79,13 +78,13 @@ test('openChat pops pushed details screens and nested Settings sheets back to th
 
   openChat(container, { kind: 'room', id: 'r-team' })
   assert.equal(container.getState().routes.length, 1)
-  assert.deepEqual(container.getState().routes[0].params, { kind: 'room', id: 'r-team' })
+  assert.deepEqual(activeChatTarget(container.getState()), { kind: 'room', id: 'r-team' })
 
   container.openSettingsSubpage('Providers')
   assert.equal(container.getState().routes.at(-1)?.name, 'Settings')
   openChat(container, { kind: 'bot', id: 'b-writer' })
   assert.equal(container.getState().routes.length, 1)
-  assert.deepEqual(container.getState().routes[0].params, { kind: 'bot', id: 'b-writer' })
+  assert.deepEqual(activeChatTarget(container.getState()), { kind: 'bot', id: 'b-writer' })
 })
 
 test('openChat with no target pops back to Chat while preserving existing params', () => {
@@ -107,4 +106,14 @@ test('activeChatTarget resolves launch fallback and clears when another screen i
 
   fresh.dispatch(CommonActions.navigate('Needs'))
   assert.equal(activeChatTarget(fresh.getState(), 'b-chief'), undefined)
+})
+
+test('openChat clears a restored read-only session when selecting the conversation normally', () => {
+  const target = { kind: 'bot', id: 'b-coder', readOnlyPart: 's-running' } as const
+  const container = createContainer(target)
+  assert.deepEqual(container.getState().routes[0].params, target)
+  openChat(container, { kind: 'bot', id: target.id })
+  assert.deepEqual(container.getState().routes[0].params, { kind: 'bot', id: target.id, readOnlyPart: undefined })
+  openChat(container, target)
+  assert.deepEqual(container.getState().routes[0].params, target)
 })
