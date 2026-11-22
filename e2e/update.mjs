@@ -1,28 +1,31 @@
-// End-to-end on an Android emulator: the in-app update. A godbot-relay serves /app/latest.json
-// and the APK; the app (paired with the stand-in computer) finds the newer version on About,
-// downloads it, checks its SHA-256 and hands it to the system installer, which installs it.
+// End-to-end on an Android emulator: a relay offers an in-app update. About shows
+// progress and speed during a throttled download, then the installer replaces the app.
 //
 //   GODBOT_E2E_RELAY_BIN   the godbot-relay binary (required)
 //   GODBOT_E2E_APK         the APK installed first and offered as the update (default: release)
 //   ANDROID_SERIAL         the emulator, when several devices are attached
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { once } from 'node:events'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { adb, dumpUi, find, install, openUrl, PACKAGE, saveUi, screenshot, scrollTo, shell, sleep, tap, waitFor } from './adb.mjs'
+import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads'
+import { adb, find, install, openUrl, PACKAGE, saveUi, screenshot, scrollTo, shell, sleep, tap, waitFor } from './adb.mjs'
 
 const APP = dirname(dirname(fileURLToPath(import.meta.url)))
 const relayBin = process.env.GODBOT_E2E_RELAY_BIN
 const apk = process.env.GODBOT_E2E_APK ?? join(APP, 'android/app/build/outputs/apk/release/app-release.apk')
-if (!relayBin || !existsSync(apk)) {
+if (isMainThread && (!relayBin || !existsSync(apk))) {
   console.error('Set GODBOT_E2E_RELAY_BIN to a godbot-relay binary, and build the release APK first.')
   process.exit(2)
 }
 const steps = []
 const step = (name, detail = '') => { steps.push({ name, detail }); console.log(`✓ ${name}${detail ? `: ${detail}` : ''}`) }
 const children = []
+let downloadWorker
 
 // Starts a process and resolves with the first stdout match of `pattern`.
 function startUntil(command, args, env, pattern, what) {
@@ -47,6 +50,32 @@ function installedVersionCode() {
   return Number(/versionCode=(\d+)/.exec(out)?.[1] ?? 0)
 }
 
+async function serveSlowDownload(bytes) {
+  // Chunked transfer exercises progress when the HTTP response has no Content-Length.
+  const chunkSize = Math.ceil(bytes.length / 100)
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { 'Content-Type': 'application/vnd.android.package-archive' })
+    let offset = 0
+    const timer = setInterval(() => {
+      if (response.writableNeedDrain) return
+      const end = Math.min(bytes.length, offset + chunkSize)
+      response.write(bytes.subarray(offset, end))
+      offset = end
+      if (offset === bytes.length) response.end()
+    }, 200)
+    response.once('close', () => clearInterval(timer))
+  })
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  return server.address().port
+}
+
+function downloadProgress(nodes, after = 0) {
+  const percent = Number.parseInt(find(nodes, /^\d+%$/)?.text ?? '', 10)
+  const speed = find(nodes, /^\d+(?:\.\d+)? (?:B|KB|MB)\/s$/)?.text
+  if (percent > after && percent < 100 && Number.parseFloat(speed ?? '') > 0) return { percent, speed }
+}
+
 async function main() {
   adb(['wait-for-device'])
   install(apk)
@@ -58,13 +87,16 @@ async function main() {
   const current = installedVersionCode()
   step('installed', `versionCode ${current}`)
 
-  // The relay serves a newer manifest that points at the APK.
+  // The relay serves a newer manifest that points at the throttled APK download.
   const dir = mkdtempSync(join(tmpdir(), 'godbot-update-'))
-  copyFileSync(apk, join(dir, 'godbot-0.1.1.apk'))
   const bytes = readFileSync(apk)
+  // The worker can keep serving bytes while the main thread waits on adb.
+  downloadWorker = new Worker(new URL(import.meta.url), { workerData: apk })
+  const [downloadPort] = await once(downloadWorker, 'message')
+  adb(['reverse', `tcp:${downloadPort}`, `tcp:${downloadPort}`])
   const manifest = {
-    versionName: '0.1.1', versionCode: current + 100, url: '/download/godbot-0.1.1.apk',
-    sha256: createHash('sha256').update(bytes).digest('hex'), size: statSync(apk).size, notes: 'E2E update',
+    versionName: '0.1.1', versionCode: current + 100, url: `http://127.0.0.1:${downloadPort}/update.apk`,
+    sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length, notes: 'E2E update',
   }
   writeFileSync(join(dir, 'latest.json'), JSON.stringify(manifest))
   const relay = await startUntil(relayBin, [], { GODBOT_RELAY_HOST: '127.0.0.1', GODBOT_RELAY_PORT: '0', GODBOT_RELAY_APP_DIR: dir },
@@ -91,6 +123,11 @@ async function main() {
 
   // Download, verify, and open the system installer.
   tap(await waitFor(nodes => find(nodes, 'Download and install', '下载并安装'), 'the install row'))
+  const first = await waitFor(nodes => downloadProgress(nodes), 'progress and speed during the download')
+  screenshot('update-download-progress')
+  const later = await waitFor(nodes => downloadProgress(nodes, first.percent), 'the download progress to advance')
+  step('live download progress and speed', `${first.percent}% at ${first.speed} → ${later.percent}% at ${later.speed}`)
+
   // The installer's buttons are in its own case ("UPDATE" on stock Android).
   const confirm = await waitFor(nodes => find(nodes, /^(update|install|更新|安装)$/i), 'the system installer', { timeout: 60_000 })
   const installer = shell('dumpsys activity activities').match(/topResumedActivity=[^\n]*/)?.[0] ?? ''
@@ -116,12 +153,17 @@ async function main() {
   console.log(JSON.stringify({ ok: true, steps }, null, 2))
 }
 
-main().catch(error => {
-  try { screenshot('update-failure'); saveUi('update-failure') } catch { /* no device */ }
-  console.error(error.stack ?? error)
-  console.log(JSON.stringify({ ok: false, error: String(error.message ?? error), steps }, null, 2))
-  process.exitCode = 1
-}).finally(() => {
-  for (const child of children) child.kill('SIGTERM')
-  try { adb(['reverse', '--remove-all']) } catch { /* no device */ }
-})
+if (isMainThread) {
+  await main().catch(error => {
+    try { screenshot('update-failure'); saveUi('update-failure') } catch { /* no device */ }
+    console.error(error.stack ?? error)
+    console.log(JSON.stringify({ ok: false, error: String(error.message ?? error), steps }, null, 2))
+    process.exitCode = 1
+  }).finally(async () => {
+    await downloadWorker?.terminate()
+    for (const child of children) child.kill('SIGTERM')
+    try { adb(['reverse', '--remove-all']) } catch { /* no device */ }
+  })
+} else {
+  parentPort.postMessage(await serveSlowDownload(readFileSync(workerData)))
+}

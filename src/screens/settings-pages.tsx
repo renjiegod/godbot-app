@@ -1,5 +1,5 @@
 // Modified for Godbot. See NOTICE.
-import { Children, Fragment, useEffect, useRef, useState } from 'react'
+import { Children, Fragment, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useIsFocused } from '@react-navigation/native'
 import { Linking, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -10,7 +10,7 @@ import { capabilityStatusFor, capabilityStatusText, unapprovedCapabilitiesFor } 
 import { useTeam } from '../team/context.tsx'
 import { keyEditable, keyOutside, keyState, type ProviderKey } from '../team/provider-key.ts'
 import type { AppManifest } from '../team/app-update.ts'
-import { checkAppUpdate, currentVersionName, installAppUpdate, type UpdatePhase } from '../team/app-update-run.ts'
+import { checkAppUpdate, currentVersionName, getAppUpdateInstall, installAppUpdate, subscribeAppUpdateInstall, type AppUpdateInstall } from '../team/app-update-run.ts'
 import { canInstall, pluginUpdateText, UPDATE_MODES, waitingText, type PluginUpdate, type UpdateMode } from '../team/plugin-update.ts'
 import { debugPush } from '../team/push-receive.ts'
 import { t } from '../ui/i18n.ts'
@@ -819,13 +819,12 @@ export function Updates({ navigation }: any) {
   )
 }
 
-type AppUpdateState =
+type AppUpdateResult =
   | { status: 'idle' | 'checking' }
-  | { status: 'current' | 'newer'; manifest: AppManifest }
-  | { status: UpdatePhase; manifest: AppManifest }
+  | { status: 'current' | 'newer' | 'installing'; manifest: AppManifest }
   | { status: 'error'; error: string; manifest?: AppManifest }
 
-function appUpdateHint(state: AppUpdateState): string | undefined {
+function appUpdateHint(state: AppUpdateResult | AppUpdateInstall): string | undefined {
   switch (state.status) {
     case 'idle': return undefined
     case 'checking': return t('Checking…')
@@ -838,13 +837,44 @@ function appUpdateHint(state: AppUpdateState): string | undefined {
   }
 }
 
+function downloadSpeed(bytesPerSecond: number): string {
+  if (bytesPerSecond >= 1_000_000) return `${(bytesPerSecond / 1_000_000).toFixed(1)} MB/s`
+  if (bytesPerSecond >= 1000) return `${(bytesPerSecond / 1000).toFixed(1)} KB/s`
+  return `${Math.round(bytesPerSecond)} B/s`
+}
+
+function AppDownloadProgress({ manifest, bytesWritten, bytesPerSecond }: Extract<AppUpdateInstall, { status: 'downloading' }>) {
+  const { p } = useTheme()
+  const progress = Math.min(100, bytesWritten / manifest.size * 100)
+  const percent = Math.floor(progress)
+  return (
+    <View style={styles.downloadProgress}>
+      <View
+        accessible
+        accessibilityRole="progressbar"
+        accessibilityLabel={t('Download progress')}
+        accessibilityValue={{ min: 0, max: 100, now: percent }}
+        style={[styles.downloadTrack, { backgroundColor: p.line2 }]}
+      >
+        <View style={{ width: `${progress}%`, height: '100%', backgroundColor: p.accent }} />
+      </View>
+      <View style={styles.downloadMetrics}>
+        <Text importantForAccessibility="no" style={[typeScale.caption, styles.downloadValue, { color: p.ink2 }]}>{percent}%</Text>
+        <Text style={[typeScale.caption, styles.downloadValue, { color: p.ink2 }]}>{downloadSpeed(bytesPerSecond)}</Text>
+      </View>
+    </View>
+  )
+}
+
 export function About({ navigation }: any) {
   const { p } = useTheme()
   const { call, computer } = useTeam()
   // The state carries no versions; the update check knows both.
   const [versions, setVersions] = useState<{ update?: { current?: string }; current?: string; dsh?: { current?: string } | null } | null>(null)
   const [testNote, setTestNote] = useState<string | null>(null)
-  const [appUpdate, setAppUpdate] = useState<AppUpdateState>({ status: 'idle' })
+  const [appUpdateResult, setAppUpdateResult] = useState<AppUpdateResult>({ status: 'idle' })
+  const activeInstall = useSyncExternalStore(subscribeAppUpdateInstall, getAppUpdateInstall)
+  const appUpdate = activeInstall ?? appUpdateResult
   useEffect(() => {
     void call('update-check').then(v => setVersions(v as typeof versions)).catch(() => {})
   }, [])
@@ -859,19 +889,20 @@ export function About({ navigation }: any) {
   }
   const checkApp = () => {
     if (computer === null) return
-    setAppUpdate({ status: 'checking' })
+    setAppUpdateResult({ status: 'checking' })
     void checkAppUpdate(computer.server).then(
-      ({ manifest, newer }) => setAppUpdate({ status: newer ? 'newer' : 'current', manifest }),
-      (f: Error) => setAppUpdate({ status: 'error', error: f?.message ?? String(f) }),
+      ({ manifest, newer }) => setAppUpdateResult({ status: newer ? 'newer' : 'current', manifest }),
+      (f: Error) => setAppUpdateResult({ status: 'error', error: f?.message ?? String(f) }),
     )
   }
   const installApp = (manifest: AppManifest) => {
-    void installAppUpdate(manifest, phase => setAppUpdate({ status: phase, manifest })).catch(
-      (f: Error) => setAppUpdate({ status: 'error', error: f?.message ?? String(f), manifest }),
+    void installAppUpdate(manifest).then(
+      opened => { if (opened) setAppUpdateResult({ status: 'installing', manifest }) },
+      (f: Error) => setAppUpdateResult({ status: 'error', error: f?.message ?? String(f), manifest }),
     )
   }
-  const busy = appUpdate.status === 'checking' || appUpdate.status === 'downloading' || appUpdate.status === 'verifying'
-  const offered = appUpdate.status === 'newer' || (appUpdate.status === 'error' && appUpdate.manifest !== undefined) ? (appUpdate as { manifest: AppManifest }).manifest : undefined
+  const busy = appUpdate.status === 'checking' || activeInstall !== null
+  const offered = appUpdate.status === 'newer' || appUpdate.status === 'error' ? appUpdate.manifest : undefined
   return (
     <Screen><Back title={t('About')} onBack={() => navigation.goBack()} />
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
@@ -883,7 +914,10 @@ export function About({ navigation }: any) {
         </Section>
         {testNote !== null ? <Text style={[typeScale.small, { color: p.ink2, paddingHorizontal: 18, marginTop: 8 }]} accessibilityLabel="test-push-result">{testNote}</Text> : null}
         <Section label={t('Phone app')}>
-          <Row label={t('Check for app updates')} hint={appUpdateHint(appUpdate)} onPress={busy ? undefined : checkApp} />
+          <View>
+            <Row label={t('Check for app updates')} hint={appUpdateHint(appUpdate)} onPress={busy ? undefined : checkApp} />
+            {appUpdate.status === 'downloading' ? <AppDownloadProgress {...appUpdate} /> : null}
+          </View>
           {offered !== undefined && !busy ? <Row label={t('Download and install')} hint={offered.notes} onPress={() => installApp(offered)} /> : null}
         </Section>
         <Section label={t('Licenses')}>
@@ -901,6 +935,10 @@ const styles = StyleSheet.create({
   card: { marginHorizontal: 14, borderRadius: radius.card, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden', ...shadow(1) },
   divider: { height: StyleSheet.hairlineWidth, marginLeft: 16 },
   row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, minHeight: 50, gap: 10 },
+  downloadProgress: { paddingHorizontal: 16, paddingBottom: 12, gap: 6 },
+  downloadTrack: { height: 6, borderRadius: radius.pill, overflow: 'hidden' },
+  downloadMetrics: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
+  downloadValue: { fontVariant: ['tabular-nums'] },
   smallBtn: { borderRadius: 10, paddingHorizontal: 12, minHeight: 36, paddingVertical: 6, alignItems: 'center', justifyContent: 'center' },
   segRow: { flexDirection: 'row', borderWidth: 1, borderRadius: radius.pill, overflow: 'hidden' },
   seg: { flex: 1, minHeight: 38, paddingVertical: 6, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
