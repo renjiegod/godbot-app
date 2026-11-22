@@ -6,6 +6,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Typecheck and tests
@@ -50,6 +53,7 @@ jobs:
       - run: npx expo prebuild --platform android --no-install
       # Signed with the release key when the secrets exist; otherwise with the debug key.
       - name: Release signing key
+        if: github.event_name != 'pull_request'
         env:
           KEYSTORE_BASE64: ${{ secrets.GODBOT_ANDROID_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.GODBOT_ANDROID_KEYSTORE_PASSWORD }}
