@@ -57,6 +57,11 @@ const pages = createChatCache<ChatPage, ChatItem>(PAGES_KEPT)
 // stays where the user scrolled when new replies or state refreshes land.
 const SCROLL_OFFSETS_KEPT = 50
 const scrollOffsets = new Map<string, number>()
+const historyAnchor = { minIndexForVisible: 0 }
+function scrollPosition(offset: number) {
+  if (offset > 600) return 'history'
+  return offset > 60 ? 'nearby' : 'latest'
+}
 function keepScrollOffset(key: string, offset: number): void {
   scrollOffsets.delete(key)
   scrollOffsets.set(key, Math.max(0, offset))
@@ -124,15 +129,15 @@ export function ChatView({ bot, room, header, onMissing }: { bot?: Bot; room?: R
   // A failed load clears itself on the next good one.
   const [loadError, setLoadError] = useState<string | null>(null)
   const [loadingOlder, setLoadingOlder] = useState(false)
-  const [awayFromLatest, setAwayFromLatest] = useState(() => (scrollOffsets.get(chatKey) ?? 0) > 600)
+  const [position, setPosition] = useState(() => scrollPosition(scrollOffsets.get(chatKey) ?? 0))
+  const awayFromLatest = position === 'history'
   const [unreadBelow, setUnreadBelow] = useState(0)
   // Each poll loop owns a generation number; a chat switch bumps it so stale
   // loops and in-flight refreshes stop writing instead of fighting the new chat.
   const generation = useRef(0)
   const list = useRef<FlatList<Row>>(null)
   const loading = useRef(false)
-  const offsetRef = useRef(scrollOffsets.get(chatKey) ?? 0)
-  const restoredForRef = useRef<string | null>(null)
+  const pendingRestore = useRef(scrollOffsets.get(chatKey) ?? 0)
   const prevPageItemsLenRef = useRef(0)
   const prevSigRef = useRef('')
 
@@ -201,10 +206,9 @@ export function ChatView({ bot, room, header, onMissing }: { bot?: Bot; room?: R
     setPageState({ key: chatKey, page: kept?.page ?? null, older: kept?.older ?? [], olderCursor: kept?.cursor })
     setGone(false)
     const saved = scrollOffsets.get(chatKey) ?? 0
-    offsetRef.current = saved
-    restoredForRef.current = null
+    pendingRestore.current = saved
     prevPageItemsLenRef.current = kept?.page?.items.length ?? 0
-    setAwayFromLatest(saved > 600)
+    setPosition(scrollPosition(saved))
     setUnreadBelow(0)
     let timer: ReturnType<typeof setTimeout> | undefined
     const loop = async () => {
@@ -478,20 +482,21 @@ export function ChatView({ bot, room, header, onMissing }: { bot?: Bot; room?: R
                 windowSize={11}
                 onEndReached={() => void loadMore()}
                 onEndReachedThreshold={0.6}
-                maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: awayFromLatest ? undefined : 60 }}
+                // Offset zero on an inverted list follows incoming rows. Anchoring
+                // the old first row here can push a whole burst of calls offscreen.
+                maintainVisibleContentPosition={position === 'latest' ? undefined : historyAnchor}
+                onScrollBeginDrag={() => { pendingRestore.current = 0 }}
                 onContentSizeChange={() => {
-                  const saved = scrollOffsets.get(chatKey) ?? 0
-                  if (saved > 0 && restoredForRef.current !== chatKey && rows.length > 0) {
-                    restoredForRef.current = chatKey
-                    requestAnimationFrame(() => list.current?.scrollToOffset({ offset: saved, animated: false }))
+                  const saved = pendingRestore.current
+                  if (saved > 0 && rows.length > 0) {
+                    pendingRestore.current = 0
+                    list.current?.scrollToOffset({ offset: saved, animated: false })
                   }
                 }}
                 onScroll={event => {
                   const y = event.nativeEvent.contentOffset.y
-                  offsetRef.current = y
                   keepScrollOffset(chatKey, y)
-                  const away = y > 600
-                  if (away !== awayFromLatest) setAwayFromLatest(away)
+                  setPosition(scrollPosition(y))
                   if (y <= 80 && unreadBelow > 0) setUnreadBelow(0)
                 }}
                 scrollEventThrottle={100}
