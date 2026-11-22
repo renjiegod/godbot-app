@@ -1,0 +1,111 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,interactive-widget=resizes-content" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'; object-src 'none'"
+    />
+    <link rel="stylesheet" href="xterm.css" />
+    <style>
+      html,
+      body,
+      #term {
+        height: 100%;
+        margin: 0;
+        background: #171d1a;
+      }
+      #term {
+        padding: 8px;
+        box-sizing: border-box;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="term"></div>
+    <script src="xterm.js"></script>
+    <script src="fit.js"></script>
+    <script>
+      const term = new Terminal({
+        fontFamily: 'monospace',
+        fontSize: 14,
+        cursorBlink: true,
+        scrollback: 2000,
+        screenReaderMode: true,
+        linkHandler: { activate() {} },
+        theme: { background: '#171d1a', foreground: '#e1e8dc', cursor: '#f6a17e' },
+      })
+      const fit = new FitAddon.FitAddon()
+      term.loadAddon(fit)
+      term.open(document.getElementById('term'))
+      let nonce = null
+      const send = (data) => {
+        if (nonce) window.ReactNativeWebView.postMessage(JSON.stringify({ ...data, nonce }))
+      }
+      let ready = false,
+        modifier = null
+      term.onData((data) => {
+        if (!ready) return
+        if (modifier === 'Ctrl' && /^[A-Za-z@\[\\\]^_]$/.test(data))
+          data = String.fromCharCode(data.toUpperCase().charCodeAt(0) & 31)
+        if (modifier === 'Alt') data = '\x1b' + data
+        if (modifier) {
+          modifier = null
+          send({ type: 'modifierConsumed' })
+        }
+        send({ type: 'input', data })
+      })
+      term.onResize(({ cols, rows }) => {
+        if (ready) send({ type: 'resize', cols, rows })
+      })
+      term.onScroll(() => send({ type: 'scrolled', atEnd: term.buffer.active.viewportY >= term.buffer.active.baseY }))
+      window.godbotTerminal = {
+        attach(value) {
+          nonce = value
+          if (ready) send({ type: 'ready', cols: term.cols, rows: term.rows })
+        },
+        receive(data, id) {
+          term.write(
+            Uint8Array.from(atob(data), (c) => c.charCodeAt(0)),
+            () => send({ type: 'rendered', id }),
+          )
+        },
+        mark(text) {
+          term.writeln('\r\n' + text + '\r\n')
+        },
+        focus() {
+          term.focus()
+        },
+        end() {
+          term.options.disableStdin = true
+          term.blur()
+        },
+        modifier(value) {
+          modifier = value
+          term.focus()
+        },
+        latest() {
+          term.scrollToBottom()
+        },
+      }
+      let previousWidth = document.documentElement.clientWidth
+      new ResizeObserver(() => {
+        const width = document.documentElement.clientWidth
+        if (width !== previousWidth && modifier) {
+          modifier = null
+          send({ type: 'modifierConsumed' })
+        }
+        previousWidth = width
+        fit.fit()
+      }).observe(document.getElementById('term'))
+      requestAnimationFrame(() => {
+        fit.fit()
+        ready = true
+        send({ type: 'ready', cols: term.cols, rows: term.rows })
+        term.focus()
+      })
+    </script>
+    <script src="terminal-keyboard.js"></script>
+  </body>
+</html>

@@ -5,6 +5,7 @@ import { createContext } from 'react'
 export interface ComputerActions {
   /** Show pairing for another computer, keeping the current ones. */
   add: () => void
+  machines: (appearance?: {theme?: string; accent?: string}) => void
   /** Link to another saved computer now. */
   switchTo: (hostDeviceId: string) => void
   /** Re-read the saved list after it changed elsewhere. */
@@ -12,4 +13,4 @@ export interface ComputerActions {
 }
 
 const noop = () => {}
-export const ComputersCtx = createContext<ComputerActions>({ add: noop, switchTo: noop, reload: noop })
+export const ComputersCtx = createContext<ComputerActions>({ add: noop, machines: noop, switchTo: noop, reload: noop })

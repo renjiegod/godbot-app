@@ -17,6 +17,23 @@ Chat with your Bots, respond to approval requests, and manage your Godbot team f
 
 Open a Bot from the team list and send a message. To pair or switch to another computer, use **Settings → Computers**. If the app asks for a Godbot upgrade, update the desktop plugin and reconnect.
 
+## Remote computers
+
+Choose **Remote computers** in the drawer, in **Settings → Computers**, or on the
+initial pairing screen. Install Godbot Computer Host on the target and generate
+a machine pairing offer there. Scan it or paste its link on the phone. Confirm
+the displayed host fingerprint before pairing. Machine pairings and team
+pairings have independent saved lists. Returning to your team restores its link.
+
+For an available display, choose **View desktop**. The Android WebRTC viewer
+starts in view-only mode. **Request control** asks the host to grant pointer and
+keyboard access. The trackpad supports relative movement, tap, long-press drag,
+and two-finger scrolling. Use **Keyboard** for composed text and shortcuts, and
+**Display settings** to change the monitor, zoom, or inspect the negotiated route.
+Shell access requires its own host grant. **Open terminal** shows the target
+account and opens an xterm session, including on a headless Linux server. Going
+to the background ends the machine session.
+
 ## What you can do
 
 - **Continue a conversation.** Read replies, send messages and attachments, and follow individual Bots or group chats.
@@ -74,12 +91,21 @@ The [end-to-end scripts](e2e/) require `adb` and an Android emulator. Pairing te
 
 | Check | Run |
 | --- | --- |
+| Pair a standalone host, exercise a real PTY and verify background teardown on a dedicated emulator | `GODBOT_SRC=/path/to/dsh-godbot GODBOT_E2E_MACHINE_RELAY=ws://127.0.0.1:18793/v1/link GODBOT_E2E_APK=/path/to/app.apk ANDROID_SERIAL=emulator-5594 npm run e2e:remote` (start a local relay first) |
 | Pair and send a message to a test computer | `GODBOT_E2E_PAIRING_URI='godbot://pair?…' npm run e2e:android` |
 | Exercise settings and chat against a real Godbot test harness | `GODBOT_E2E_CONTROL=http://127.0.0.1:47781 npm run e2e:pages` |
 | Check the upgrade prompt for an outdated computer | `npm run e2e:incompatible` |
 | Check the demo UI | `npm run e2e:demo -- /path/to/demo.apk` |
 | Test background reconnect and notifications | `GODBOT_RELAY_BIN=/path/to/godbot-relay node e2e/keepalive.mjs /path/to/app.apk` |
 | Test APK download, verification, and installation | `GODBOT_E2E_RELAY_BIN=/path/to/godbot-relay node e2e/update.mjs` |
+
+For graphical acceptance, pair the dedicated emulator with a graphical test host
+and grant that phone view and control. Run `npm run e2e:remote-desktop` with
+`ANDROID_SERIAL`, `GODBOT_E2E_DESKTOP_NAME`, `GODBOT_E2E_DESKTOP_POINT` (the
+normalized x,y center of a text field), and `GODBOT_E2E_DESKTOP_RECEIPT` (a file
+updated by that field). Set `GODBOT_E2E_DESKTOP_CONTAINER` if the receipt lives
+inside your staging container. `GODBOT_E2E_FORCE_TURN=1` checks the selected RTC
+candidate pair before exercising input.
 
 For a local pairing test, start a relay and run `npm run e2e:fake-host -- ws://127.0.0.1:<port>/v1/link` to generate a pairing link and receive test messages. Set `GODBOT_E2E_RELAY_PORT` if the script needs to map the emulator's relay port with `adb reverse`. The desktop repository also provides the `PHONE-ANDROID` end-to-end case for the packaged Godbot plugin.
 

@@ -1,7 +1,7 @@
 // Modified for Godbot. See NOTICE.
 import { createNativeStackNavigator } from '@react-navigation/native-stack'
 import { useNavigation, type NavigationProp, type ParamListBase } from '@react-navigation/native'
-import { useEffect, useRef, useState } from 'react'
+import { useContext, useEffect, useRef, useState } from 'react'
 import { ActivityIndicator, Alert, Image, Platform, Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native'
 import * as Notifications from 'expo-notifications'
 import { targetOf } from '../team/push-payload.ts'
@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as SecureStore from 'expo-secure-store'
 import { onPrefsChange, readPrefs } from '../store.ts'
 import { Drawer, useDrawer } from './Drawer.tsx'
+import { ComputersCtx } from './computers.ts'
 import { DEMO, useTeam } from '../team/context.tsx'
 import { ErrorBoundary } from '../ui/error-boundary.tsx'
 import { hostText, t } from '../ui/i18n.ts'
@@ -33,6 +34,7 @@ import { lastChatKey, lastChatOf, primaryBot, type RosterEntry, type RosterSecti
 const Stack = createNativeStackNavigator()
 
 function DrawerContent() {
+  const computers = useContext(ComputersCtx)
   const { p } = useTheme()
   const { team, computer, online, error, call } = useTeam()
   const insets = useSafeAreaInsets()
@@ -116,6 +118,13 @@ function DrawerContent() {
       </View>
       {menu && <SidebarMenu key={menu.kind} menu={menu} onChange={setMenu}
         onCreate={openScreen} onSettings={showSettings} />}
+      {!DEMO && (
+        <Pressable accessibilityRole="button" onPress={() => computers.machines(team?.prefs)}
+          style={[styles.remoteComputers, { borderTopColor: p.line }]}>
+          <Text style={[typeScale.rowName, { color: p.ink }]}>{t('Remote computers')}</Text>
+          <ChevronRightIcon size={16} color={p.ink2} />
+        </Pressable>
+      )}
       <View style={[styles.foot, { paddingBottom: insets.bottom + 8 }]}>
         <Pressable accessibilityRole="button" accessibilityLabel={t('Settings')} onPress={() => openScreen('Settings')} hitSlop={4} style={[styles.round, { borderColor: p.line, backgroundColor: p.card }]}>
           <GearIcon size={18} color={p.ink2} />
@@ -426,6 +435,7 @@ const styles = StyleSheet.create({
   needsRow: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 12, marginBottom: 4, borderRadius: 10, paddingHorizontal: 12, height: 44 },
   badge: { minWidth: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
   foot: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingTop: 6 },
+  remoteComputers: { minHeight: 48, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: StyleSheet.hairlineWidth },
   host: { flex: 1, minWidth: 0, minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 4 },
   hostDot: { width: 6, height: 6, borderRadius: 3 },
   brand: { flex: 1, flexDirection: 'row', alignItems: 'center', minWidth: 0, gap: 5 },

@@ -1,6 +1,7 @@
 // Modified for Godbot. See NOTICE.
 import * as SecureStore from 'expo-secure-store'
 import { deviceIdFor, generateKeyPair, randomToken, type DeviceIdentity, type PairingOffer } from '../godbot/link/index.ts'
+import type { ComputerHello, SavedMachine } from './machine/model.ts'
 import { forgetPushKey } from './team/push-keys.ts'
 
 export interface PhoneIdentity extends DeviceIdentity {
@@ -110,4 +111,36 @@ export async function writePrefs(patch: Record<string, string>): Promise<void> {
   prefsCache = { ...(await readPrefs()), ...patch }
   await SecureStore.setItemAsync(PREFS, JSON.stringify(prefsCache), LOCAL)
   prefListeners.forEach(listener => listener())
+}
+
+// A machine controller never changes the team selected by the background service.
+const MACHINES = 'godbot.machines.v1'
+let machineWrites = Promise.resolve()
+export async function listMachines(): Promise<SavedMachine[]> {
+  const stored = await read(MACHINES)
+  return Array.isArray(stored) ? stored : []
+}
+function updateMachines(edit: (items: SavedMachine[]) => SavedMachine[]) {
+  const write = machineWrites.then(async () => {
+    const next = edit(await listMachines())
+    await SecureStore.setItemAsync(MACHINES, JSON.stringify(next), LOCAL)
+  })
+  machineWrites = write.catch(() => {})
+  return write
+}
+export async function rememberMachine(offer: SavedComputer, hello: ComputerHello): Promise<SavedMachine> {
+  const machine: SavedMachine = {
+    kind: 'machine', server: offer.server, hostDeviceId: offer.hostDeviceId, hostKey: offer.hostKey,
+    name: hello.name, os: hello.os, account: hello.account, desktop: hello.desktop, terminal: hello.terminal, lastConnected: Date.now(),
+  }
+  await updateMachines(items => [machine, ...items.filter(x => x.hostDeviceId !== machine.hostDeviceId)])
+  return machine
+}
+export async function markMachineConnected(id: string, hello: ComputerHello): Promise<void> {
+  await updateMachines(items => items.map(item => item.hostDeviceId === id ? {
+    ...item, name: hello.name, os: hello.os, account: hello.account, desktop: hello.desktop, terminal: hello.terminal, lastConnected: Date.now(),
+  } : item))
+}
+export async function forgetMachine(id: string): Promise<void> {
+  await updateMachines(items => items.filter(x => x.hostDeviceId !== id))
 }

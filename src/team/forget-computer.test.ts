@@ -60,3 +60,18 @@ test('forgetting a computer forgets its push key and keeps the others', async ()
   const again = await keys.ensurePushKey('d-host-a')
   assert.notEqual(again, keyA)
 })
+
+test('machine enrollment preserves the active team and excludes the one-use offer code', async () => {
+  const team = await store.addComputer(offer('d-team', 'Test team'))
+  const machineOffer = { ...offer('d-machine', 'Headless server'), code: 'ephemeral-machine-offer' }
+  const hello = { version: 1 as const, kind: 'computer' as const, name: machineOffer.name, os: 'Linux',
+    account: 'test', terminal: true, desktop: false, control: false }
+  const machine = await store.rememberMachine(machineOffer, hello)
+  assert.equal((await store.loadComputer())?.hostDeviceId, team.hostDeviceId)
+  assert.equal((await store.listMachines())[0].hostDeviceId, machine.hostDeviceId)
+  assert.ok(![...disk.values()].some(value => value.includes(machineOffer.code)))
+  await store.forgetMachine(machine.hostDeviceId)
+  await store.markMachineConnected(machine.hostDeviceId, hello)
+  assert.deepEqual(await store.listMachines(), [])
+  assert.equal((await store.loadComputer())?.hostDeviceId, team.hostDeviceId)
+})

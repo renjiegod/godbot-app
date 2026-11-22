@@ -12,7 +12,7 @@ import * as Crypto from 'expo-crypto'
 import { listComputers, removeComputer, type StoredComputer } from '../store.ts'
 import { ComputersCtx } from '../nav/computers.ts'
 import * as ImagePicker from 'expo-image-picker'
-import { useTeam } from '../team/context.tsx'
+import { DEMO, useTeam } from '../team/context.tsx'
 import { memorySummaryText } from '../team/memory.ts'
 import { botPrivacyBlock, botSessions, isLocalModel, modelRoute, sessionFigures, sessionUsage, type SessionStats } from '../team/bot-details.ts'
 import { connectorRows } from '../team/connectors.ts'
@@ -1426,7 +1426,7 @@ const fingerprint = async (key: string): Promise<string> => {
 
 export function Computers({ navigation }: any) {
   const { p } = useTheme()
-  const { online, computer } = useTeam()
+  const { online, computer, team } = useTeam()
   const [list, setList] = useState<StoredComputer[]>([])
   const [prints, setPrints] = useState<Record<string, string>>({})
   useEffect(() => {
@@ -1441,6 +1441,7 @@ export function Computers({ navigation }: any) {
     <Screen title="">
       <BackRow title={t('Computers')} onBack={() => navigation.goBack()} />
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
+        {!DEMO && <Section label={t('Remote computers')}><Row label={t('Remote computers')} onPress={() => actions.machines(team?.prefs)} /></Section>}
         <Section label={t('Godbot teams')}>
           {list.map(item => {
             const active = item.hostDeviceId === computer?.hostDeviceId

@@ -3,16 +3,17 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 // Modified for Godbot. See NOTICE.
-import { parsePairingUri } from '../../godbot/link/index.ts'
+import { identityFingerprint, type RpcClient } from '../../godbot/link/index.ts'
+import { machineHello, type SavedMachine } from '../machine/model.ts'
 import { openLink } from '../connection.ts'
 import { linkManager } from '../team/link.ts'
-import { addComputer, type PhoneIdentity, type SavedComputer } from '../store.ts'
+import { addComputer, rememberMachine, type PhoneIdentity, type SavedComputer } from '../store.ts'
 import { errorText } from '../team/link.ts'
 import { previewPairing, type PairingPreview } from '../team/pairing-link.ts'
 import { t } from '../ui/i18n.ts'
 import { radius, type as typeScale, useTheme } from '../ui/tokens.ts'
 
-export function Pair({ identity, offer, onPaired, onCancel }: { identity: PhoneIdentity; offer?: string | null; onPaired: (computer: SavedComputer) => void; onCancel?: () => void }) {
+export function Pair({ identity, offer, machineEntry = false, onPaired, onMachine, onMachines, onCancel }: { identity: PhoneIdentity; offer?: string | null; machineEntry?: boolean; onPaired: (computer: SavedComputer) => void; onCancel?: () => void; onMachine: (machine: SavedMachine) => void; onMachines?: () => void }) {
   const { p } = useTheme()
   const insets = useSafeAreaInsets()
   const [permission, requestPermission] = useCameraPermissions()
@@ -27,17 +28,32 @@ export function Pair({ identity, offer, onPaired, onCancel }: { identity: PhoneI
   // link while this screen pairs, and takes it back after.
   useEffect(() => linkManager.pause(), [])
 
-  const pair = useCallback(async (uri: string) => {
+  const connecting = useRef<RpcClient | null>(null)
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; void connecting.current?.close() } }, [])
+
+  const pair = useCallback(async (preview: PairingPreview) => {
     if (busyRef.current) return
     busyRef.current = true; setBusy(true); setError(null)
     try {
-      const offer = parsePairingUri(uri.trim())
-      const client = await openLink(offer, identity, offer.code)
-      await client.close()
-      onPaired(await addComputer(offer))
-    } catch (failure) { setError(errorText(failure)) }
-    finally { busyRef.current = false; setBusy(false) }
-  }, [identity, onPaired])
+      const offer = preview.offer
+      const client = await openLink(offer, identity, offer.code, attempt => { connecting.current = attempt })
+      if (!mounted.current) return
+      if (preview.kind === 'machine') {
+        const hello = await machineHello(client)
+        await client.close()
+        if (mounted.current) onMachine(await rememberMachine(offer, hello))
+      } else {
+        await client.close()
+        if (mounted.current) onPaired(await addComputer(offer))
+      }
+    } catch (failure) {
+      const code = String((failure as { code?: unknown })?.code ?? '')
+      setError(preview.kind === 'machine' && ['NOT_PAIRED','PAIRING_REJECTED','INVALID_CODE','EXPIRED_CODE'].includes(code)
+        ? 'Get a new offer on the computer.' : errorText(failure))
+    }
+    finally { await connecting.current?.close().catch(() => {}); connecting.current = null; busyRef.current = false; if (mounted.current) setBusy(false) }
+  }, [identity, onPaired, onMachine])
 
   useEffect(() => {
     if (offer === null || offer === undefined) return
@@ -51,6 +67,13 @@ export function Pair({ identity, offer, onPaired, onCancel }: { identity: PhoneI
     }
   }, [offer])
 
+  function review(uri:string) {
+    try {
+      const preview = previewPairing(uri, machineEntry)
+      if (preview.kind === 'team') { void pair(preview); return }
+      setLink(uri); setError(null); setConfirm(preview)
+    } catch(error){ setError(errorText(error)) }
+  }
   if (confirm !== null) {
     return (
       <View style={[styles.center, { flex: 1, backgroundColor: p.main, paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }]}>
@@ -60,6 +83,7 @@ export function Pair({ identity, offer, onPaired, onCancel }: { identity: PhoneI
           <Text style={[typeScale.settingsRow, { color: p.ink, marginBottom: 10 }]} accessibilityLabel="pair-computer-name">{confirm.name || '—'}</Text>
           <Text style={[typeScale.small, { color: p.ink3 }]}>{t('Server')}</Text>
           <Text style={[typeScale.settingsRow, { color: p.ink }]} accessibilityLabel="pair-server">{confirm.server}</Text>
+          {confirm.kind === 'machine' ? <Text style={{color:p.ink2,marginTop:12}}>{t('Host fingerprint')} · {identityFingerprint(confirm.offer.hostKey)}</Text> : null}
         </View>
         <Text style={[typeScale.small, { color: p.ink2, marginTop: 12, textAlign: 'center' }]}>{t('Only pair with a computer you set up yourself.')}</Text>
         <View style={[styles.pairRow, { justifyContent: 'center', marginTop: 20 }]}>
@@ -67,7 +91,7 @@ export function Pair({ identity, offer, onPaired, onCancel }: { identity: PhoneI
             style={[styles.button, { backgroundColor: p.hover, opacity: busy ? 0.35 : 1 }]}>
             <Text style={[typeScale.settingsRow, { color: p.ink }]}>{t('Cancel')}</Text>
           </Pressable>
-          <Pressable accessibilityRole="button" accessibilityLabel={t('Pair')} disabled={busy} onPress={() => { const uri = link; setConfirm(null); void pair(uri) }}
+          <Pressable accessibilityRole="button" accessibilityLabel={t('Pair')} disabled={busy} onPress={() => { void pair(confirm); setConfirm(null) }}
             style={[styles.button, { backgroundColor: p.accent, opacity: busy ? 0.35 : 1 }]}>
             <Text style={[typeScale.settingsRow, { color: p.accentInk, fontWeight: '600' }]}>{t('Pair')}</Text>
           </Pressable>
@@ -79,27 +103,30 @@ export function Pair({ identity, offer, onPaired, onCancel }: { identity: PhoneI
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, backgroundColor: p.main }}>
       <ScrollView contentContainerStyle={[styles.center, { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }]} keyboardShouldPersistTaps="handled">
-        <Text style={[typeScale.largeTitle, { color: p.ink, textAlign: 'center' }]}>{t('Pair with your computer')}</Text>
-        <Text style={[typeScale.settingsRow, { color: p.ink2, marginTop: 12, textAlign: 'center' }]}>{t('On the computer, open Godbot, go to Settings → Phone and show a QR code. Then scan it here.')}</Text>
+        <Text style={[typeScale.largeTitle, { color: p.ink, textAlign: 'center' }]}>{t(machineEntry ? 'Pair a remote computer' : 'Pair with your computer')}</Text>
+        <Text style={[typeScale.settingsRow, { color: p.ink2, marginTop: 12, textAlign: 'center' }]}>{t(machineEntry
+          ? 'On your Mac or Linux computer, open Godbot Computer Host and create a pairing offer. Scan its QR code or paste its link here.'
+          : 'On the computer, open Godbot, go to Settings → Phone and show a QR code. Then scan it here.')}</Text>
         <View style={[styles.camera, { backgroundColor: p.sidebar, borderColor: p.line }]}>
           {permission?.granted
-            ? <CameraView style={StyleSheet.absoluteFill} barcodeScannerSettings={{ barcodeTypes: ['qr'] }} onBarcodeScanned={busy ? undefined : ({ data }) => void pair(data)} />
+            ? <CameraView style={StyleSheet.absoluteFill} barcodeScannerSettings={{ barcodeTypes: ['qr'] }} onBarcodeScanned={busy ? undefined : ({ data }) => review(data)} />
             : <Pressable accessibilityRole="button" onPress={() => void requestPermission()} style={[styles.button, { backgroundColor: p.accent }]}>
                 <Text style={[typeScale.settingsRow, { color: p.accentInk, fontWeight: '600' }]}>{t('Use the camera')}</Text>
               </Pressable>}
         </View>
         <Text style={[typeScale.settingsRow, { color: p.ink2, marginTop: 16, textAlign: 'center' }]}>{t('No camera? Paste the pairing link.')}</Text>
         <View style={styles.pairRow}>
-          <TextInput value={link} onChangeText={setLink} placeholder="godbot://pair?…" placeholderTextColor={p.ink3} autoCapitalize="none" autoCorrect={false}
-            returnKeyType="go" onSubmitEditing={() => { if (link.trim() !== '') void pair(link) }}
+          <TextInput value={link} onChangeText={setLink} placeholder={machineEntry ? 'godbot://computer-pair?…' : 'godbot://pair?…'} placeholderTextColor={p.ink3} autoCapitalize="none" autoCorrect={false}
+            returnKeyType="go" onSubmitEditing={() => { if (link.trim() !== '') review(link) }}
             style={[styles.input, { color: p.ink, backgroundColor: p.hover }]} accessibilityLabel={t('Pairing link')} />
-          <Pressable accessibilityRole="button" disabled={busy || link.trim() === ''} onPress={() => void pair(link)}
+          <Pressable accessibilityRole="button" disabled={busy || link.trim() === ''} onPress={() => review(link)}
             style={[styles.button, { backgroundColor: p.accent, opacity: busy || link.trim() === '' ? 0.35 : 1 }]}>
             <Text style={[typeScale.settingsRow, { color: p.accentInk, fontWeight: '600' }]}>{t('Pair')}</Text>
           </Pressable>
         </View>
         {busy ? <ActivityIndicator style={{ marginTop: 20 }} color={p.accent} /> : null}
-        {error ? <Text style={[typeScale.settingsRow, { color: p.danger, marginTop: 12, textAlign: 'center' }]} accessibilityRole="alert">{error}</Text> : null}
+        {error ? <Text style={[typeScale.settingsRow, { color: p.danger, marginTop: 12, textAlign: 'center' }]} accessibilityRole="alert">{t(error)}</Text> : null}
+        {!machineEntry && onMachines && <Pressable accessibilityRole="button" onPress={onMachines} disabled={busy} style={{minHeight:48,justifyContent:"center"}}><Text style={{color:p.accent}}>{t("Remote computers")}</Text></Pressable>}
         {onCancel !== undefined ? (
           <Pressable accessibilityRole="button" onPress={onCancel} hitSlop={8} style={{ marginTop: 20, minHeight: 44, justifyContent: 'center' }}>
             <Text style={[typeScale.settingsRow, { color: p.ink2 }]}>{t('Cancel')}</Text>
