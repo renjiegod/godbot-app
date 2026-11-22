@@ -10,7 +10,7 @@ Chat with your Bots, respond to approval requests, and manage your Godbot team f
 
 ## Install and pair
 
-1. Download `godbot-<version>.apk` from the latest [GitHub Release][releases]. The APK supports Android 7.0 (API 24) or later on ARM phones (`arm64-v8a` and `armeabi-v7a`).
+1. Download `godbot-<version>.apk` from the latest [GitHub Release][releases]. The APK supports Android 7.0 (API 24) or later on 64-bit ARM phones (`arm64-v8a`). 32-bit-only phones (`armeabi-v7a`) are not supported.
 2. Open the APK and allow installs from that source if Android prompts. If you have the older debug-signed test build, uninstall it first. Uninstalling clears the app's local settings and pairings.
 3. On your computer, open Godbot's **Settings → Phone**. Enter a relay address such as `wss://<your relay>/v1/link`, enable phone access, and show the pairing QR code.
 4. In the Android app, tap **Use the camera** to scan the QR code, or paste the pairing link. If you open a `godbot://pair?…` link from another app, check the computer and server shown before tapping **Pair**.
@@ -72,10 +72,10 @@ The shared link, UI definitions, and file-transfer code in `godbot/` are checked
 
 ```sh
 npx expo prebuild --platform android --clean
-(cd android && ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a,armeabi-v7a)
+(cd android && ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a)
 ```
 
-The APK is written to `android/app/build/outputs/apk/release/app-release.apk`. Provide `GODBOT_ANDROID_KEYSTORE`, `GODBOT_ANDROID_KEYSTORE_PASSWORD`, `GODBOT_ANDROID_KEY_ALIAS`, and `GODBOT_ANDROID_KEY_PASSWORD` to use a release key. Local builds default to debug signing. Use the same release key for each distributed APK so Android can install updates in place.
+The APK is written to `android/app/build/outputs/apk/release/app-release.apk`. To serve it from the relay, also put `gzip -9 -k -n <apk>` next to it: the relay sends the `.gz` copy to clients that accept gzip, and they unpack it to the same APK. Provide `GODBOT_ANDROID_KEYSTORE`, `GODBOT_ANDROID_KEYSTORE_PASSWORD`, `GODBOT_ANDROID_KEY_ALIAS`, and `GODBOT_ANDROID_KEY_PASSWORD` to use a release key. Local builds default to debug signing. Use the same release key for each distributed APK so Android can install updates in place.
 
 Set `EXPO_PUBLIC_GODBOT_DEMO=1` at build time to open the built-in team without pairing. After a demo build, unset the flag and force Metro to regenerate the release bundle with `./gradlew :app:createBundleReleaseJsAndAssets --rerun assembleRelease` from `android/`.
 

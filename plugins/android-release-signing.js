@@ -28,7 +28,7 @@ const RELEASE_CONFIG = `
 const RELEASE_ABI_EXCLUDES = `
 androidComponents {
     onVariants(selector().withBuildType("release")) { variant ->
-        variant.packaging.jniLibs.excludes.addAll(["**/x86/**", "**/x86_64/**"])
+        variant.packaging.jniLibs.excludes.addAll(["**/x86/**", "**/x86_64/**", "**/armeabi-v7a/**"])
     }
 }
 `
@@ -50,7 +50,8 @@ function sign(gradle) {
 }
 
 // Keep debug x86/x86_64 emulators working via default gradle.properties; only release strips
-// simulator ABIs (via androidComponents above and -PreactNativeArchitectures in CI) while
+// simulator ABIs and 32-bit ARM (via androidComponents above and -PreactNativeArchitectures in
+// CI), so the release APK carries arm64-v8a only and downloads about a third smaller, while
 // storing uncompressed, 16KB-aligned native libraries inside the APK (Android 15+ requirement).
 // AGP 9 stamps Expo 58 prebuilt AARs with minCompileSdk=37 when compiling against SDK 36;
 // disableCompileSdkChecks bypasses that metadata guard while compiling/linking against SDK 36.
