@@ -293,6 +293,7 @@ const MOBILE_ZH: Record<string, string> = {
   'Check for app updates': '检查 App 更新',
   'Godbot {version} for Android is available': 'Android 版 Godbot {version} 可用',
   'Download and install': '下载并安装',
+  'Download progress': '下载进度',
   'Checking the download…': '正在校验下载…',
   'Opening the installer…': '正在打开安装程序…',
   'This Server address has no update page.': '这个服务器地址没有更新页面。',
