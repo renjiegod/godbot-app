@@ -10,6 +10,8 @@ export const GATED = new Set([
   'connector-client', 'connector-sign-in-code',
   'capability-save', 'capability-delete', 'capability-approve', 'bot-capability',
   'update-install', 'dsh-update-install',
+  // Signs a CLI on the computer in to an account (local-sign-in.ts).
+  'local-agent-login-start',
 ])
 
 export async function ensureUnlock(endpoint: string): Promise<void> {

@@ -9,6 +9,8 @@ import type { Approval, Bot, Question, Room } from '../connection.ts'
 import { createChatCache, joinChatItems } from '../team/chat-cache.ts'
 import { connectorCanConnectOnMobile } from '../team/connectors.ts'
 import { useTeam } from '../team/context.tsx'
+import { agentNameOf, signInPlace } from '../team/local-sign-in.ts'
+import { LocalSignIn } from './chat/local-sign-in.tsx'
 import { markSeen } from '../team/seen.ts'
 import { messageClock, t } from '../ui/i18n.ts'
 import { ErrorBoundary } from '../ui/error-boundary.tsx'
@@ -679,25 +681,39 @@ function failureText(code: string, name: string, provider: string, status?: numb
     case 'QUOTA': return status === undefined ? t('{provider} is out of balance or quota.', { provider }) : t('{provider} is out of balance or quota ({status}).', { provider, status })
     case 'ACCOUNT_QUOTA': return t('The DeepSeek account balance is too low.')
     case 'ACCOUNT_SIGN_IN_REQUIRED': case 'ACCOUNT_SIGNED_OUT': case 'ACCOUNT_TOKEN_INVALID': return t('The DeepSeek account sign-in has expired.')
+    // A local agent CLI on the computer (the desktop's turn-error.js says the same).
+    case 'LOCAL_AGENT_SIGNIN': return t('{agent} is not signed in, or its sign-in has expired.', { agent: provider })
+    case 'LOCAL_AGENT_QUOTA': return t('{agent} is out of usage or quota for now.', { agent: provider })
+    case 'LOCAL_AGENT_MISSING': return t('{agent} is not installed on this computer.', { agent: provider })
+    case 'LOCAL_AGENT_EXIT': return t('{agent} stopped before this turn finished.', { agent: provider })
     default: return t('This turn failed.')
   }
 }
 
 function BlockedCard({ bot, p }: { bot: Bot; p: ReturnType<typeof useTheme>['p'] }) {
   const navigation = useNavigation<any>()
-  const { team } = useTeam()
+  const { team, hello } = useTeam()
+  const [signing, setSigning] = useState(false)
   const blocked = bot.blocked!
-  const provider = (team?.models ?? []).find(model => model.ref.split('/')[0] === blocked.provider)?.providerName ?? blocked.provider ?? ''
+  const named = (team?.models ?? []).find(model => model.ref.split('/')[0] === blocked.provider)?.providerName
+  const local = blocked.code.startsWith('LOCAL_AGENT_') && blocked.provider !== undefined
+  const provider = local ? agentNameOf(blocked.provider!, named) : named ?? blocked.provider ?? ''
   const key = ['MISSING_CREDENTIAL', 'INVALID_CREDENTIAL', 'AUTH'].includes(blocked.code)
   const topUp = blocked.code === 'QUOTA' && blocked.provider === 'deepseek-official' || blocked.code === 'ACCOUNT_QUOTA'
+  // A signed-out CLI on the computer: Claude Code and Codex sign in from here.
+  const place = blocked.code === 'LOCAL_AGENT_SIGNIN' ? signInPlace(blocked.provider, hello?.capabilities) : null
   return (
     <View style={[styles.blocked, { backgroundColor: p.card, borderColor: p.line }]} accessibilityRole="alert">
       <Text style={[type.settingsRow, { color: p.ink }]}>{failureText(blocked.code, bot.name, provider, blocked.status)}</Text>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
         {key ? <Pressable accessibilityRole="button" onPress={() => navigation.navigate('Settings', { screen: 'Providers', initial: false })} style={[styles.fix, { backgroundColor: p.accent }]}><Text style={{ color: p.accentInk, fontWeight: '600' }}>{blocked.code === 'MISSING_CREDENTIAL' ? t('Enter API key') : t('Enter the key again')}</Text></Pressable> : null}
         {topUp ? <Pressable accessibilityRole="button" onPress={() => void Linking.openURL('https://platform.deepseek.com/top_up')} style={[styles.fix, { backgroundColor: p.accent }]}><Text style={{ color: p.accentInk, fontWeight: '600' }}>{t('Top up ↗')}</Text></Pressable> : null}
+        {place === 'phone' && !signing ? <Pressable testID="local-sign-in-open" accessibilityRole="button" onPress={() => setSigning(true)} style={[styles.fix, { backgroundColor: p.accent }]}><Text style={{ color: p.accentInk, fontWeight: '600' }}>{t('Sign in')}</Text></Pressable> : null}
         <Pressable accessibilityRole="button" onPress={() => navigation.navigate('BotDetails', { botId: bot.id })} style={[styles.fix, { backgroundColor: p.hover }]}><Text style={{ color: p.ink }}>{t('Pick another model')}</Text></Pressable>
       </View>
+      {place === 'computer' ? <Text style={[type.small, { color: p.ink2, marginTop: 8 }]}>{t('{agent} signs in in a terminal: sign it in from Godbot on the computer.', { agent: provider })}</Text> : null}
+      {place === 'update-godbot' ? <Text style={[type.small, { color: p.ink2, marginTop: 8 }]}>{t('Update Godbot on the computer to sign in {agent} from the phone.', { agent: provider })}</Text> : null}
+      {place === 'phone' && signing ? <LocalSignIn botId={bot.id} botName={bot.name} route={blocked.provider!} agent={provider} p={p} /> : null}
     </View>
   )
 }
