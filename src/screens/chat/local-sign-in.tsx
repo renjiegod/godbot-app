@@ -20,6 +20,8 @@ export function LocalSignIn({ botId, botName, route, agent, p }: { botId: string
   const [pasted, setPasted] = useState('')
   const [copied, setCopied] = useState(false)
   const [attempt, setAttempt] = useState(0)
+  // The phone stopped following this sign-in (an error it could not get past).
+  const [lost, setLost] = useState(false)
   const current = useRef<LoginView | null>(null)
   const resumed = useRef(false)
 
@@ -28,20 +30,34 @@ export function LocalSignIn({ botId, botName, route, agent, p }: { botId: string
     let loginId: string | undefined
     setView(null)
     setError(null)
+    setLost(false)
     resumed.current = false
     void (async () => {
       try {
         let next = await call('local-agent-login-start', { route, method: PHONE_METHODS[route] }) as LoginView
         loginId = next.loginId
+        let failures = 0
         while (!stopped) {
           current.current = next
           setView(next)
           if (!ACTIVE_STATES.has(next.state)) break
-          // Under the link's 30-second request limit.
-          next = await call('local-agent-login-wait', { loginId, version: next.version, waitMs: 12_000 }) as LoginView
+          try {
+            // Under the link's 30-second request limit.
+            next = await call('local-agent-login-wait', { loginId, version: next.version, waitMs: 12_000 }) as LoginView
+            failures = 0
+          } catch (failure) {
+            if (stopped) break
+            // The browser sends the app to the background, and the link may drop and
+            // come back meanwhile: the sign-in goes on on the computer, so keep asking.
+            // A sign-in the computer no longer has is over.
+            if (/has ended|已结束/u.test(message(failure)) || ++failures > 60) throw failure
+            await new Promise(resolve => setTimeout(resolve, Math.min(1_000 * failures, 5_000)))
+          }
         }
       } catch (failure) {
-        if (!stopped && (failure as { code?: string })?.code !== 'unlock/canceled') setError(message(failure))
+        if (stopped) return
+        setLost(true)
+        if ((failure as { code?: string })?.code !== 'unlock/canceled') setError(message(failure))
       }
     })()
     return () => {
@@ -64,7 +80,12 @@ export function LocalSignIn({ botId, botName, route, agent, p }: { botId: string
     setBusy(true)
     setError(null)
     try {
-      await call(endpoint, { loginId: view.loginId, ...payload })
+      const next = await call(endpoint, { loginId: view.loginId, ...payload }) as LoginView | null
+      // The answer is the sign-in as it is now: shown at once, without waiting for the poll.
+      if (next !== null && typeof next === 'object' && next.loginId === view.loginId) {
+        current.current = next
+        setView(previous => (previous !== null && previous.version > next.version ? previous : next))
+      }
       return true
     } catch (failure) {
       setError(message(failure))
@@ -135,8 +156,8 @@ export function LocalSignIn({ botId, botName, route, agent, p }: { botId: string
       {step.kind === 'canceled' ? <Text style={[styles.small, { color: p.ink2 }]}>{t('The sign-in was canceled.')}</Text> : null}
       {error !== null ? <Text style={[styles.small, { color: p.danger }]}>{error}</Text> : null}
       <View style={styles.row}>
-        {ACTIVE_STATES.has(view?.state ?? '') && step.kind !== 'computer' ? button(t('Cancel'), () => void act('local-agent-login-cancel'), false, busy) : null}
-        {step.kind === 'failed' || step.kind === 'canceled' || (error !== null && view === null) ? button(t('Try again'), restart) : null}
+        {ACTIVE_STATES.has(view?.state ?? '') && step.kind !== 'computer' && !lost ? button(t('Cancel'), () => void act('local-agent-login-cancel'), false, busy) : null}
+        {step.kind === 'failed' || step.kind === 'canceled' || lost ? button(t('Try again'), restart) : null}
       </View>
     </View>
   )
