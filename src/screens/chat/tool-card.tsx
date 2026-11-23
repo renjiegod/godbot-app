@@ -1,14 +1,34 @@
 import { useEffect, useState } from 'react'
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 import { useTeam } from '../../team/context.tsx'
+import { ChevronRightIcon } from '../../ui/icons.tsx'
 import { t } from '../../ui/i18n.ts'
 import { type Palette, type as typeScale } from '../../ui/tokens.ts'
 import type { ChatItem } from './items.tsx'
+import type { ItemRow } from './tool-groups.ts'
 
 const statusLabels: Record<string, string> = { running: 'Running', completed: 'Done', failed: 'Failed',
   pending: 'Pending', interrupted: 'Interrupted', declined: 'Declined' }
 const fields = { cwd: 'Working folder', input: 'Input', output: 'Output', error: 'Error', changes: 'Changes' }
 type Details = Partial<Record<keyof typeof fields, string>>
+
+export function ToolGroupCard({ tools, p, open, onToggle }: { tools: ItemRow[]; p: Palette; open: boolean; onToggle: () => void }) {
+  const name = t('{count} tool calls', { count: tools.length })
+  const running = tools.filter(({ item }) => item.status === 'running' || item.status === 'pending').length
+  const failed = tools.filter(({ item }) => item.status === 'failed').length
+  const runningLabel = running ? t('{count} running', { count: running }) : ''
+  const failedLabel = failed ? t('{count} failed', { count: failed }) : ''
+  return <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }}
+    accessibilityLabel={[name, runningLabel, failedLabel].filter(Boolean).join(', ')} onPress={onToggle}
+    style={({ pressed }) => [styles.heading, { backgroundColor: pressed ? p.hover : undefined }]}>
+    <View style={open ? styles.chevronOpen : undefined}>
+      <ChevronRightIcon size={15} color={p.ink2} />
+    </View>
+    <Text style={[typeScale.small, { color: p.ink2 }]}>{name}</Text>
+    {runningLabel ? <Text style={[typeScale.caption, { color: p.ink2 }]}>{runningLabel}</Text> : null}
+    {failedLabel ? <Text style={[typeScale.caption, { color: p.danger }]}>{failedLabel}</Text> : null}
+  </Pressable>
+}
 
 export function ToolCard({ item, p, open, onToggle }: { item: ChatItem; p: Palette; open: boolean; onToggle?: () => void }) {
   const { call } = useTeam()
@@ -57,6 +77,7 @@ export function ToolCard({ item, p, open, onToggle }: { item: ChatItem; p: Palet
 const styles = StyleSheet.create({
   card: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 9, marginVertical: 3 },
   heading: { minHeight: 44, flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', paddingHorizontal: 10, paddingVertical: 7, gap: 7 },
+  chevronOpen: { transform: [{ rotate: '90deg' }] },
   target: { flexShrink: 1 },
   status: { marginLeft: 'auto' },
   body: { borderTopWidth: StyleSheet.hairlineWidth, padding: 10, gap: 8 },

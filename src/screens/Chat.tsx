@@ -21,6 +21,8 @@ import { workPhrase } from '../ui/phrases.ts'
 import { ActionRow, Dock } from './chat/dock.tsx'
 import { Composer, type Photo } from './chat/composer.tsx'
 import { Actions, Item, keysOf, PhotoViewer, PhotoViewerCtx, type ChatItem, type FileRef, type ImageRef } from './chat/items.tsx'
+import { ToolGroupCard } from './chat/tool-card.tsx'
+import { groupToolRows, type ChatRow } from './chat/tool-groups.ts'
 import { bumpMarkdownImageCache } from './chat/markdown.tsx'
 
 // Feed events refresh the chat as things happen; the poll only catches what a
@@ -32,7 +34,6 @@ const KEYBOARD_GAP = 6
 
 interface ChatPage { sessionId?: string; items: ChatItem[]; cursor: unknown; inlineTools?: boolean }
 interface ChatWindow { key: string; page: ChatPage | null; older: ChatItem[]; olderCursor?: unknown }
-interface Row { item: ChatItem; key: string; stamp?: string }
 
 // A refreshed page reuses the item objects that did not change, so the memoized
 // rows keep their identity and only new or changed rows render again.
@@ -141,7 +142,7 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
   // Each poll loop owns a generation number; a chat switch bumps it so stale
   // loops and in-flight refreshes stop writing instead of fighting the new chat.
   const generation = useRef(0)
-  const list = useRef<FlatList<Row>>(null)
+  const list = useRef<FlatList<ChatRow>>(null)
   const loading = useRef(false)
   const pendingRestore = useRef(scrollOffsets.get(chatKey) ?? 0)
   const prevPageItemsLenRef = useRef(0)
@@ -323,7 +324,7 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
       setReaderText(typeof read === 'string' ? read : read?.text ?? '')
     }, (failure: { code?: string; message?: string }) => setFileError(failure?.message ?? t('This file cannot be read here')))
   }, [call])
-  // One stable toggle per steps row, so a memoized row is not redrawn for a new closure.
+  // Keep disclosure callbacks stable for memoized rows.
   const toggles = useRef(new Map<string, () => void>())
   const toggleOf = (key: string) => {
     let toggle = toggles.current.get(key)
@@ -448,12 +449,17 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
     const shown = pending.filter(o => o.known !== undefined && items.some((item, index) => !o.known!.has(keys[index]) && sameMessage(item, o.item)))
     if (shown.length > 0) setOutbox(chatKey, list => list.filter(o => !shown.includes(o)))
   }, [items, pending, chatKey])
-  const rows = useMemo<Row[]>(() => {
+  const groupedRows = useMemo(() => {
     const all = [...items, ...pending.map(o => o.item)]
     const keys = keysOf(all)
-    // Inverted list: index 0 sits at the bottom, so the newest row comes first.
-    return all.map((item, index) => ({ item, key: keys[index], stamp: room !== undefined || item.local !== undefined ? undefined : stampOf(all, index) })).reverse()
+    return groupToolRows(all.map((item, index) => ({
+      item, key: keys[index], stamp: room !== undefined || item.local !== undefined ? undefined : stampOf(all, index),
+    })))
   }, [items, pending, room !== undefined])
+  // Expanded tool cards remain list rows, so long runs use the same windowing
+  // as the rest of the inverted transcript.
+  const rows = useMemo(() => groupedRows.flatMap(row =>
+    'tools' in row && openSteps[row.key] ? [row, ...row.tools] : [row]).reverse(), [groupedRows, openSteps])
   // Group rows show each member's name, color and mark; a team refresh that changes
   // none of these keeps the same map, so the rows are not drawn again.
   const memberKey = JSON.stringify((team?.bots ?? []).map(entry => [entry.id, entry.name, entry.color, entry.avatar?.shape, entry.avatar?.imageRef ?? entry.avatar?.image?.length]))
@@ -462,7 +468,8 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
   const inRoom = room !== undefined
   const admin = room?.admin
 
-  const renderRow = useCallback<ListRenderItem<Row>>(({ item: row }) => {
+  const renderRow = useCallback<ListRenderItem<ChatRow>>(({ item: row }) => {
+    if ('tools' in row) return <ToolGroupCard tools={row.tools} p={p} open={openSteps[row.key] === true} onToggle={toggleOf(row.key)} />
     const { item } = row
     return (
       <ErrorBoundary inline>
