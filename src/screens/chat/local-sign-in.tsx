@@ -18,7 +18,8 @@ export function LocalSignIn({ botId, botName, route, agent, p }: { botId: string
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [pasted, setPasted] = useState('')
-  const [copied, setCopied] = useState(false)
+  // What the phone last put on the clipboard: the one-time code or the sign-in link.
+  const [copied, setCopied] = useState<'code' | 'link' | null>(null)
   const [attempt, setAttempt] = useState(0)
   // The phone stopped following this sign-in (an error it could not get past).
   const [lost, setLost] = useState(false)
@@ -114,7 +115,7 @@ export function LocalSignIn({ botId, botName, route, agent, p }: { botId: string
           <Text style={[styles.small, { color: p.ink2 }]}>{t('Open the page, sign in, and enter this one-time code.')}</Text>
           <View style={styles.row}>
             <Text testID="local-sign-in-code" selectable style={[styles.code, { color: p.ink, backgroundColor: p.hover }]}>{step.code}</Text>
-            {button(copied ? t('Copied to clipboard') : t('Copy code'), () => void Clipboard.setStringAsync(step.code).then(() => setCopied(true)))}
+            {button(copied === 'code' ? t('Copied to clipboard') : t('Copy code'), () => void Clipboard.setStringAsync(step.code).then(() => setCopied('code')))}
           </View>
         </>
       ) : null}
@@ -125,10 +126,16 @@ export function LocalSignIn({ botId, botName, route, agent, p }: { botId: string
         <View style={styles.row}>
           {button(t('Open the sign-in page'), () => {
             // Codex's page asks for the code: it is on the clipboard when the page opens.
-            if (step.kind === 'device') void Clipboard.setStringAsync(step.code).then(() => setCopied(true))
+            if (step.kind === 'device') void Clipboard.setStringAsync(step.code).then(() => setCopied('code'))
             void Linking.openURL(link)
           }, true)}
+          {/* The page may not open here (no browser, a check this browser cannot pass): the
+              link opens on any other device, and the code comes back here. */}
+          {button(copied === 'link' ? t('Copied to clipboard') : t('Copy link'), () => void Clipboard.setStringAsync(link).then(() => setCopied('link')))}
         </View>
+      ) : null}
+      {link !== undefined ? (
+        <Text style={[styles.small, { color: p.ink3 }]}>{t('To sign in on another device, copy the link and open it there.')}</Text>
       ) : null}
       {step.kind === 'code' ? (
         <View style={styles.row}>

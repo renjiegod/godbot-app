@@ -492,6 +492,8 @@ const MOBILE_ZH: Record<string, string> = {
   'Start again': '重新开始',
   '{agent} signs in in a terminal: sign it in from Godbot on the computer.': '{agent} 需要在终端里登录，请在电脑上的 Godbot 里登录。',
   'Update Godbot on the computer to sign in {agent} from the phone.': '更新电脑上的 Godbot 后，才能在手机上登录 {agent}。',
+  'Copy link': '复制链接',
+  'To sign in on another device, copy the link and open it there.': '想在其他设备上登录，复制链接后在那里打开。',
 }
 
 const systemZh = (): boolean => {
