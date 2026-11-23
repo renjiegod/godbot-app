@@ -1,22 +1,5 @@
 import type { Bot, TeamState } from '../connection.ts'
 
-export function botSessions(bot: Bot, team: TeamState | null) {
-  const current = bot.sessionId ?? bot.id
-  const empty = new Set(team?.emptyParts?.[bot.id])
-  const open = (bot.openParts ?? []).map(part => part.sessionId)
-  const earlier = (bot.parts ?? []).filter(id => id !== current).slice().reverse()
-  const ids = [...new Set([current, ...open, ...earlier])]
-  const numbers = new Map((bot.partOrder ?? ids.slice().reverse()).map((id, index) => [id, index + 1]))
-  return ids.flatMap((id, index) => {
-    const running = team?.partsRunning?.[id] === true
-    if (id !== current && empty.has(id) && !running) return []
-    return [{
-      id, running, current: id === current, number: numbers.get(id) ?? ids.length - index,
-      fresh: id === current && team?.newSessions?.[bot.id] === 'empty',
-    }]
-  })
-}
-
 export interface SessionStats {
   sessionStats?: { turns?: number; steps?: number; decodeTokens?: number; decodeMs?: number }
   tokenUsage?: { uncachedInputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number; outputTokens?: number }

@@ -17,6 +17,8 @@ import { shadow, type as typeScale, useTheme } from '../ui/tokens.ts'
 import { Avatar, RoomAvatar } from '../ui/marks.tsx'
 import { ChevronRightIcon, ClockIcon, FolderIcon, GearIcon, PlusIcon, SearchIcon, SidebarIcon, SideIcon } from '../ui/icons.tsx'
 import { ChatView, prefetchChat } from '../screens/Chat.tsx'
+import { SessionsButton, SessionSheet, useSessionsAvailable } from '../screens/chat/sessions.tsx'
+import { parallelSessions } from '../team/bot-sessions.ts'
 import { NeedsYou } from '../screens/NeedsYou.tsx'
 import { Settings } from '../screens/Settings.tsx'
 import { TeamList, type ChatTarget } from '../screens/TeamList.tsx'
@@ -157,7 +159,7 @@ function Pill({ title, bot, room, bots }: { title: string; bot?: Parameters<type
   )
 }
 
-function Header({ title, bot, room, bots = [], onMenu, onPill, onSide }: { title: string; bot?: Parameters<typeof Avatar>[0]['bot']; room?: Room; bots?: Bot[]; onMenu: () => void; onPill?: () => void; onSide?: () => void }) {
+function Header({ title, bot, room, bots = [], onMenu, onPill, onSide, sessions }: { title: string; bot?: Parameters<typeof Avatar>[0]['bot']; room?: Room; bots?: Bot[]; onMenu: () => void; onPill?: () => void; onSide?: () => void; sessions?: React.ReactNode }) {
   const { p } = useTheme()
   const { team, online, error } = useTeam()
   const pending = pendingCountOf(team) > 0
@@ -177,6 +179,7 @@ function Header({ title, bot, room, bots = [], onMenu, onPill, onSide }: { title
           : bot === undefined && room === undefined ? <Text style={[typeScale.headerTitle, { color: p.ink }]} numberOfLines={1}>{title}</Text>
             : onPill !== undefined ? <Pressable accessibilityRole="button" onPress={onPill} style={{ maxWidth: '100%' }}><Pill title={title} bot={bot} room={room} bots={bots} /></Pressable> : <Pill title={title} bot={bot} room={room} bots={bots} />}
       </View>
+      {sessions}
       {onSide !== undefined ? (
         <Pressable accessibilityRole="button" accessibilityLabel={t('Side chat')} onPress={onSide} hitSlop={8} style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
           <SideIcon size={20} color={p.ink2} />
@@ -208,6 +211,10 @@ function ChatScreenB({ route, navigation }: any) {
   const room = kind === 'room' ? team?.rooms?.find(r => r.id === id) : undefined
   const readOnlyPart = params?.readOnlyPart
   const partsRunning = team?.partsRunning
+  // The Bot's sessions, from the Sessions button in the top bar.
+  const [sessionsOpen, setSessionsOpen] = useState(false)
+  const sessionsAvailable = useSessionsAvailable(bot)
+  useEffect(() => { setSessionsOpen(false) }, [kind, id])
   useEffect(() => {
     if (readOnlyPart !== undefined && readOnlyPart === bot?.sessionId && partsRunning !== undefined && partsRunning[readOnlyPart] !== true) {
       navigation.setParams({ readOnlyPart: undefined })
@@ -225,7 +232,8 @@ function ChatScreenB({ route, navigation }: any) {
       void SecureStore.setItemAsync(key, JSON.stringify(params)).catch(() => {})
     }
   }, [team === null, key, params, missing, fallback?.id, navigation])
-  const header = <Header title={bot?.name ?? room?.name ?? ''} bot={bot} room={room} bots={team?.bots ?? []} onMenu={() => drawer.open()} onPill={() => { if (bot) navigation.navigate('BotDetails', { botId: bot.id }); else if (room) navigation.navigate('GroupDetails', { roomId: room.id }) }} onSide={bot !== undefined && bot.sessionId !== undefined ? () => navigation.navigate('Side', { bot, sessionId: bot.sessionId }) : undefined} />
+  const header = <Header title={bot?.name ?? room?.name ?? ''} bot={bot} room={room} bots={team?.bots ?? []} onMenu={() => drawer.open()} onPill={() => { if (bot) navigation.navigate('BotDetails', { botId: bot.id }); else if (room) navigation.navigate('GroupDetails', { roomId: room.id }) }} onSide={bot !== undefined && bot.sessionId !== undefined ? () => navigation.navigate('Side', { bot, sessionId: bot.sessionId }) : undefined}
+    sessions={bot !== undefined && sessionsAvailable ? <SessionsButton bot={bot} onPress={() => setSessionsOpen(true)} /> : undefined} />
   if (team === null) return (
     <View style={{ flex: 1, backgroundColor: p.main }}>
       {header}
@@ -242,8 +250,16 @@ function ChatScreenB({ route, navigation }: any) {
     if (fallback !== undefined) navigation.setParams({ kind: 'bot', id: fallback.id, readOnlyPart: undefined })
     else void SecureStore.deleteItemAsync(key).catch(() => {})
   }
-  const sessionReadOnly = readOnlyPart !== undefined && readOnlyPart === bot?.sessionId && partsRunning?.[readOnlyPart] === true
-  return <ChatView key={`${computer?.hostDeviceId ?? ''}:${kind}:${id}`} bot={bot} room={room} header={header} onMissing={onMissing} sessionReadOnly={sessionReadOnly} />
+  // An older computer's desktop keeps a running session it opens read-only until its turn
+  // ends; a newer one takes input in any session, the running ones included.
+  const sessionReadOnly = !parallelSessions(team) && readOnlyPart !== undefined && readOnlyPart === bot?.sessionId && partsRunning?.[readOnlyPart] === true
+  return (
+    <>
+      <ChatView key={`${computer?.hostDeviceId ?? ''}:${kind}:${id}`} bot={bot} room={room} header={header} onMissing={onMissing} sessionReadOnly={sessionReadOnly} />
+      {bot !== undefined && sessionsOpen ? <SessionSheet bot={bot} visible onClose={() => setSessionsOpen(false)}
+        onOpened={(entry, readOnly) => navigation.setParams({ readOnlyPart: readOnly ? entry.id : undefined })} /> : null}
+    </>
+  )
 }
 
 function NeedsSheet({ navigation }: any) {

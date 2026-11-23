@@ -2,7 +2,7 @@
 // Bot and group management screens, mirroring the desktop details drawer and
 // settings forms: Bot details, Edit Bot, Create Bot, group settings, and the
 // "new" sheet. Every write goes through the same endpoints the desktop calls.
-import { Children, Fragment, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { Children, Fragment, useCallback, useContext, useEffect, useState } from 'react'
 import { useIsFocused } from '@react-navigation/native'
 import { Alert, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -14,7 +14,9 @@ import { ComputersCtx } from '../nav/computers.ts'
 import * as ImagePicker from 'expo-image-picker'
 import { DEMO, useTeam } from '../team/context.tsx'
 import { memorySummaryText } from '../team/memory.ts'
-import { botPrivacyBlock, botSessions, isLocalModel, modelRoute, sessionFigures, sessionUsage, type SessionStats } from '../team/bot-details.ts'
+import { botPrivacyBlock, isLocalModel, modelRoute, sessionFigures, sessionUsage, type SessionStats } from '../team/bot-details.ts'
+import { botSessions, sessionLabel } from '../team/bot-sessions.ts'
+import { SessionRow, useSessionsAvailable, useSessionSwitch } from './chat/sessions.tsx'
 import { connectorRows } from '../team/connectors.ts'
 import { folderPlan, type FolderPlan, type FoldersView } from '../team/folders.ts'
 import { t, timeLabel, weekdayShort } from '../ui/i18n.ts'
@@ -238,7 +240,7 @@ export function BotDetails({ route, navigation }: any) {
           <DetailStats stats={stats} />
           <DetailTitle text={t('Model')} />
           <ModelMenu bot={bot} readOnly={!writable} onManage={() => navigation.navigate('Settings', { screen: 'Providers', initial: false })} />
-          <BotSessions key={bot.id} bot={bot} team={team} writable={writable} navigation={navigation} run={run} />
+          <BotSessions key={bot.id} bot={bot} team={team} navigation={navigation} />
           {permissions?.options && permissions.options.length > 0 ? (
             <>
               <DetailTitle text={t('Permissions')} />
@@ -341,82 +343,49 @@ function BotFolder({ bot, navigation, writable }: { bot: Bot; navigation: any; w
   )
 }
 
-function BotSessions({ bot, team, writable, navigation, run }: { bot: Bot; team: TeamState | null; writable: boolean; navigation: any; run: ManageWrite }) {
+// The Bot's sessions, as the desktop's details panel lists them (details-drawer.js
+// BotSessions); the chat's Sessions button shows the same list. Any of them opens from
+// here, even while another one works: that one goes on in the background.
+function BotSessions({ bot, team, navigation }: { bot: Bot; team: TeamState | null; navigation: any }) {
   const { p } = useTheme()
-  const { refresh } = useTeam()
-  const [pending, setPending] = useState<'new' | 'open' | null>(null)
-  const asked = useRef(false)
-  const [startingFrom, setStartingFrom] = useState<string | null>(null)
-  const current = bot.sessionId ?? bot.id
-  const state = team?.newSessions?.[bot.id]
+  const available = useSessionsAvailable(bot)
+  const { pending, error, open, start, starting, canStart, writable, newState } = useSessionSwitch(bot, {
+    onOpened: (entry, readOnly) => openChat(navigation, { kind: 'bot', id: bot.id, ...(readOnly ? { readOnlyPart: entry.id } : {}) }),
+    onStarted: moved => { if (moved) openChat(navigation, { kind: 'bot', id: bot.id }) },
+  })
   const sessions = botSessions(bot, team)
-  const opening = state === 'opening' || pending === 'new' || startingFrom !== null
-  const startDisabled = !writable || opening || pending !== null || state === 'empty'
-  useEffect(() => {
-    if (startingFrom !== null && current !== startingFrom) {
-      setStartingFrom(null)
-      openChat(navigation, { kind: 'bot', id: bot.id })
-    }
-  }, [startingFrom, current, navigation, bot.id])
-  useEffect(() => {
-    if (startingFrom === null || startingFrom !== current || state === 'opening') return
-    const timer = setTimeout(() => {
-      setStartingFrom(null)
-      refresh?.()
-    }, 20_000)
-    return () => clearTimeout(timer)
-  }, [startingFrom, current, state, refresh])
-  const start = async () => {
-    if (startDisabled || asked.current) return
-    asked.current = true
-    setPending('new')
-    await run('bot-new-part', { botId: bot.id }, result => {
-      if (result === true) setStartingFrom(current)
-    })
-    setPending(null)
-    asked.current = false
-  }
-  const open = async (session: typeof sessions[number]) => {
-    if (!writable || opening || pending !== null || asked.current || session.current) return
-    asked.current = true
-    setPending('open')
-    await run('bot-open-part', { botId: bot.id, sessionId: session.id }, () => {
-      openChat(navigation, { kind: 'bot', id: bot.id, ...(session.running ? { readOnlyPart: session.id } : {}) })
-    })
-    setPending(null)
-    asked.current = false
-  }
+  const busy = pending !== null || starting
   return (
     <>
       <DetailTitle text={t('Sessions')} />
-      {writable ? (
-        <Pressable accessibilityRole="button" accessibilityLabel={t('New session')} accessibilityState={{ disabled: startDisabled, busy: opening }}
-          accessibilityHint={state === 'empty' ? t('This is already a new session. Send a message to begin.') : undefined}
-          disabled={startDisabled} onPress={() => void start()}
-          style={[styles.inlineAction, { backgroundColor: p.hover, marginBottom: 8, opacity: startDisabled ? 0.65 : 1 }]}>
-          <PlusIcon size={16} color={p.accent} />
-          <Text style={[typeScale.small, { color: p.ink }]}>{opening ? t('Starting…') : t('New session')}</Text>
-        </Pressable>
-      ) : null}
-      {sessions.some(session => session.running && !session.current) ? (
-        <Text style={[typeScale.caption, { color: p.ink2, marginBottom: 8 }]}>{t('A running session keeps using model calls in the background.')}</Text>
-      ) : null}
-      <View style={[styles.detailRows, { borderColor: p.line, backgroundColor: p.card }]}>
-        {sessions.map((session, index) => {
-          const label = session.fresh ? t('New session') : t('Session {number}', { number: session.number })
-          const meta = session.running ? t('Running') : session.current ? t('Current') : ''
-          const disabled = !writable || session.current || opening || pending !== null
-          return (
-            <Pressable key={session.id} accessibilityRole="button" accessibilityLabel={label} accessibilityHint={meta || undefined}
-              accessibilityState={{ disabled, selected: session.current }} disabled={disabled} onPress={() => void open(session)}
-              style={[styles.detailListRow, { backgroundColor: session.current ? p.hover : p.card, borderTopColor: p.line, borderTopWidth: index === 0 ? 0 : StyleSheet.hairlineWidth }]}>
-              <Text style={[typeScale.small, { color: p.ink, flex: 1 }]} numberOfLines={1}>{label}</Text>
-              {meta ? <Text style={[typeScale.caption, { color: session.running ? p.accent : p.ink3 }]}>{meta}</Text> : null}
-              {!disabled ? <ChevronRightIcon size={15} color={p.ink3} /> : null}
+      {!available ? (
+        <Text style={[typeScale.caption, { color: p.ink2, marginBottom: 8 }]}>{t('Update Godbot on the computer to switch sessions from the phone.')}</Text>
+      ) : (
+        <>
+          {writable ? (
+            <Pressable accessibilityRole="button" accessibilityLabel={t('New session')} accessibilityState={{ disabled: !canStart, busy: starting }}
+              accessibilityHint={newState === 'empty' ? t('This is already a new session. Send a message to begin.') : undefined}
+              disabled={!canStart} onPress={() => void start()}
+              style={[styles.inlineAction, { backgroundColor: p.hover, marginBottom: 8, opacity: canStart || starting ? 1 : 0.65 }]}>
+              <PlusIcon size={16} color={p.accent} />
+              <Text style={[typeScale.small, { color: p.ink }]}>{starting ? t('Starting…') : t('New session')}</Text>
             </Pressable>
-          )
-        })}
-      </View>
+          ) : null}
+          {sessions.some(session => session.running && !session.current) ? (
+            <Text style={[typeScale.caption, { color: p.ink2, marginBottom: 8 }]}>{t('A running session keeps using model calls in the background.')}</Text>
+          ) : null}
+          <View style={[styles.detailRows, { borderColor: p.line, backgroundColor: p.card }]}>
+            {sessions.map((session, index) => (
+              <Fragment key={session.id}>
+                {index > 0 ? <View style={[styles.divider, { backgroundColor: p.line }]} /> : null}
+                <SessionRow entry={session} label={sessionLabel(session, bot, team)} p={p} opening={pending === session.id}
+                  disabled={!writable || busy} onPress={() => void open(session)} />
+              </Fragment>
+            ))}
+          </View>
+          {error !== null ? <Text accessibilityRole="alert" style={[typeScale.small, { color: p.danger, marginTop: 8 }]}>{error}</Text> : null}
+        </>
+      )}
     </>
   )
 }
@@ -1520,7 +1489,6 @@ const styles = StyleSheet.create({
   aboutInput: { minHeight: 88, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.card, paddingHorizontal: 12, paddingVertical: 10, textAlignVertical: 'top' },
   inlineAction: { minHeight: 44, borderRadius: 10, paddingHorizontal: 12, flexDirection: 'row', gap: 8, alignItems: 'center' },
   detailRows: { borderRadius: radius.card, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
-  detailListRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, minHeight: 44 },
   tabs: { flexDirection: 'row', alignSelf: 'center', borderRadius: 10, padding: 2, marginTop: 14 },
   tab: { minWidth: 72, minHeight: 44, borderRadius: 8, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12 },
   segments: { flexDirection: 'row', borderRadius: 10, padding: 2 },

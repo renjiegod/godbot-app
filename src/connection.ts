@@ -120,6 +120,9 @@ export interface TeamState {
   partsRunning?: Record<string, boolean>
   newSessions?: Record<string, 'opening' | 'empty'>
   emptyParts?: Record<string, string[]>
+  // Each part of a Bot's own chat by the first thing the user asked in it (part-titles.js).
+  // Sent by a host whose Bot chats go on in the background while another part is open.
+  partTitles?: Record<string, string>
   sections?: { id: string; name: string; collapsed?: boolean; color?: string }[]
   memory?: boolean
   questions?: Record<string, Question>
@@ -136,7 +139,9 @@ export interface TeamState {
   dataPath?: string
   version?: string
   work?: {
-    bots?: Record<string, { tool?: string; said?: string; note?: string; target?: string; switching?: boolean; folder?: boolean }>
+    // `since`: when the turn began (as `turns` keys it per Session); `roomId`: the work
+    // runs in that group chat, not in the Bot's own chat.
+    bots?: Record<string, { tool?: string; said?: string; note?: string; target?: string; switching?: boolean; folder?: boolean; since?: number; roomId?: string }>
     rooms?: Record<string, { botId: string; tool?: string; said?: string; note?: string; target?: string }[]>
     approvals?: Approval[]
     waiting?: Record<string, { bots?: string[]; rooms?: string[] }>

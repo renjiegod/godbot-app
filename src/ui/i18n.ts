@@ -497,6 +497,16 @@ const MOBILE_ZH: Record<string, string> = {
   'Update Godbot on the computer to sign in {agent} from the phone.': '更新电脑上的 Godbot 后，才能在手机上登录 {agent}。',
   'Copy link': '复制链接',
   'To sign in on another device, copy the link and open it there.': '想在其他设备上登录，复制链接后在那里打开。',
+  // A Bot's sessions (bot-sessions.ts). The desktop's own entries win once its dictionary
+  // has them; until then these match its wording.
+  'Sessions of {name}': '{name} 的会话',
+  '{count} running in the background': '{count} 个会话在后台运行',
+  'A new session is starting; try again in a moment': '新会话正在打开，请稍后再试',
+  'Another session became current meanwhile; open this one again': '期间已切换到另一个会话，请重新打开这个会话',
+  'The Bot is working; wait for it to finish or stop it first': 'Bot 正在工作，请等它结束或先停止它',
+  'Unknown part': '找不到这个会话',
+  'Update Godbot on the computer to switch sessions from the phone.': '更新电脑上的 Godbot 后，才能在手机上切换会话。',
+  'Opening this session…': '正在打开这个会话…',
 }
 
 const systemZh = (): boolean => {

@@ -10,6 +10,7 @@ import { inkColor, radius, type as typeScale, useTheme } from '../ui/tokens.ts'
 import { Avatar, RoomAvatar } from '../ui/marks.tsx'
 import { ChevronRightIcon, DotsIcon, PinMarkIcon } from '../ui/icons.tsx'
 import { workPhrase } from '../ui/phrases.ts'
+import { backgroundRunning, currentPart, partWork } from '../team/bot-sessions.ts'
 import { cleanPreview } from './chat/settled.ts'
 
 export type { ChatTarget } from '../nav/sidebar-roster.ts'
@@ -33,12 +34,12 @@ export function TeamList({ onOpen, onOptions, onSection, onToggleSection, query,
   const bots = team?.bots ?? []
   const rooms = team?.rooms ?? []
   const { lead, mains, ungrouped, sections } = rosterOf(team, current, query)
-  const workBots = team?.work?.bots ?? {}
   const workRooms = team?.work?.rooms ?? {}
   const pending = pendingItemsOf(team)
   const selected = ({ kind, item }: RosterEntry) => current?.kind === kind && current.id === item.id
 
-  const activityOf = (bot: Bot) => workBots[bot.id] ?? team?.activity?.[bot.id]
+  // The current part's work: a session going on in the background says so on its own line.
+  const activityOf = (bot: Bot) => partWork(bot, currentPart(bot), team)
   const waitsFor = (id: string) => {
     const waiting = team?.work?.waiting?.[id]
     const names = [
@@ -54,10 +55,11 @@ export function TeamList({ onOpen, onOptions, onSection, onToggleSection, query,
     const doing = activityOf(bot)
     const group = Object.entries(workRooms).flatMap(([roomId, entries]) => entries.filter(item => item.botId === bot.id).map(item => ({ roomId, item })))
     const away = group[0]
-    const running = doing !== undefined || away !== undefined
-    const work = doing !== undefined ? `${workPhrase(doing)}…` : away === undefined
-      ? undefined
-      : `${rooms.find(room => room.id === away.roomId)?.name ?? t('a group chat')} · ${workPhrase(away.item)}…${group.length > 1 ? ` +${group.length - 1}` : ''}`
+    const background = backgroundRunning(bot, team)
+    const running = doing !== undefined || away !== undefined || background > 0
+    const work = doing !== undefined ? `${workPhrase(doing)}…` : away !== undefined
+      ? `${rooms.find(room => room.id === away.roomId)?.name ?? t('a group chat')} · ${workPhrase(away.item)}…${group.length > 1 ? ` +${group.length - 1}` : ''}`
+      : background > 0 ? t('{count} running in the background', { count: background }) : undefined
     return { attention, running, preview: attention ? action : waitsFor(bot.id) ?? work ?? cleanPreview(bot.preview) }
   }
   const roomStatus = (room: Room) => {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { Bot, TeamState } from '../connection.ts'
-import { botPrivacyBlock, botSessions, modelsForBot, sessionFigures, sessionUsage } from './bot-details.ts'
+import { botPrivacyBlock, modelsForBot, sessionFigures, sessionUsage } from './bot-details.ts'
 
 const bot: Bot = {
   id: 'bot-1',
@@ -11,26 +11,6 @@ const bot: Bot = {
   openParts: [{ sessionId: 'part-3' }, { sessionId: 'part-5' }],
   partOrder: ['bot-1', 'part-2', 'part-3', 'part-4', 'part-5'],
 }
-
-test('session list retains the host numbers and preserves a running background part even if empty', () => {
-  const team: TeamState = {
-    revision: 1,
-    bots: [bot],
-    partsRunning: { 'part-3': true },
-    emptyParts: { [bot.id]: ['part-2', 'part-3', 'part-5'] },
-    newSessions: { [bot.id]: 'empty' },
-  }
-  assert.deepEqual(botSessions(bot, team), [
-    { id: 'part-4', running: false, current: true, number: 4, fresh: true },
-    { id: 'part-3', running: true, current: false, number: 3, fresh: false },
-    { id: 'bot-1', running: false, current: false, number: 1, fresh: false },
-  ])
-})
-
-test('older Godbot host without explicit numbering still lists current and historical sessions', () => {
-  const rows = botSessions({ id: 'bot', name: 'Bot', sessionId: 'now', parts: ['first', 'now'] }, null)
-  assert.deepEqual(rows.map(row => [row.id, row.number, row.current]), [['now', 2, true], ['first', 1, false]])
-})
 
 test('model changes stay on the exact local route, including the account and workspace', () => {
   const models = [

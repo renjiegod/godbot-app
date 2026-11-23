@@ -10,6 +10,7 @@ import { createChatCache, joinChatItems } from '../team/chat-cache.ts'
 import { connectorCanConnectOnMobile } from '../team/connectors.ts'
 import { useTeam } from '../team/context.tsx'
 import { agentNameOf, signInPlace } from '../team/local-sign-in.ts'
+import { partWork } from '../team/bot-sessions.ts'
 import { LocalSignIn } from './chat/local-sign-in.tsx'
 import { markSeen } from '../team/seen.ts'
 import { messageClock, t } from '../ui/i18n.ts'
@@ -276,7 +277,9 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
   const sessionId = activePart ?? page?.sessionId ?? room?.id ?? id
   const question: Question | undefined = team?.questions?.[sessionId]
   const approvals = (team?.work?.approvals ?? []).filter((entry: Approval) => entry.sessionId === sessionId || (entry.roomId !== undefined && entry.roomId === room?.id))
-  const doing = bot !== undefined ? team?.work?.bots?.[bot.id] ?? team?.activity?.[bot.id] : undefined
+  // The part on screen's own work: while another session of the Bot runs in the
+  // background, the Bot's work may be that one's (bot-sessions.ts partWork).
+  const doing = bot !== undefined ? partWork(bot, sessionId, team) : undefined
   const activeTool = doing && !doing.tool ? page?.items.findLast(item => item.kind === 'tool' && item.status === 'running') : undefined
   const secrets = (team?.secretRequests?.[bot?.id ?? ''] ?? []).filter((r: { status?: string }) => r.status === 'pending')
   const connectorRequests = (team?.connectorRequests?.[bot?.id ?? ''] ?? []).filter((r: { status?: string }) => r.status === 'pending')

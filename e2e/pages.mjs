@@ -267,7 +267,9 @@ async function main() {
       await seed(next.sessionId, secondMessage)
       await wait('the second transcript', secondMessage)
       await openBotDetails(`${name} edited`)
-      await tapOn('the original session', 'Session 1')
+      // A computer that names sessions by the first thing asked in them shows that name;
+      // an older one numbers them.
+      await tapOn('the original session', firstMessage, 'Session 1')
       await until(activeBot, value => value?.sessionId === first, 'the session opened on Android on Web')
       r.write += ', Android session changes confirmed through Web'
       await wait('the original transcript on Android', firstMessage)
