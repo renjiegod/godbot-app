@@ -14,7 +14,9 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "io.github.renjiegod.godbot",
-      "blockedPermissions": ["android.permission.RECORD_AUDIO"],
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO"
+      ],
       "permissions": [
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.FOREGROUND_SERVICE",
@@ -34,6 +36,14 @@
           "cameraPermission": "Godbot uses the camera to scan the pairing code that your computer shows.",
           "microphonePermission": false,
           "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 144,
+          "backgroundColor": "#0a162e"
         }
       ],
       [
