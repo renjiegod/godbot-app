@@ -24,6 +24,7 @@ import { Composer, type Photo } from './chat/composer.tsx'
 import { Actions, Item, keysOf, PhotoViewer, PhotoViewerCtx, type ChatItem, type FileRef, type ImageRef } from './chat/items.tsx'
 import { ToolGroupCard } from './chat/tool-card.tsx'
 import { groupToolRows, type ChatRow } from './chat/tool-groups.ts'
+import { chatLayout, CONVERSATION_INSET, CONVERSATION_WIDTH, type ChatLayout } from './chat/layout.ts'
 import { bumpMarkdownImageCache } from './chat/markdown.tsx'
 
 // Feed events refresh the chat as things happen; the poll only catches what a
@@ -291,9 +292,13 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
   const doingBot = bot ?? (roomWork[0] !== undefined ? team?.bots?.find(b => b.id === roomWork[0].botId) : undefined)
   const doingText = doing !== undefined ? workPhrase(activeTool ? { ...doing, tool: activeTool.name, target: activeTool.text } : doing)
     : roomWork[0] !== undefined ? `${doingBot?.name ?? ''} · ${workPhrase(roomWork[0])}` : ''
-  const flat = team?.prefs?.layout === 'flat'
+  const layout = chatLayout(team?.prefs?.layout, bot !== undefined)
+  const conversation = layout === 'conversation'
   const width = Math.min(100, Math.max(50, team?.prefs?.width ?? 80))
-  const [chatWidth, setChatWidth] = useState(() => Math.max(0, Dimensions.get('window').width - 24))
+  const flatWidth = Math.min(100, Math.max(50, team?.prefs?.flatWidth ?? 100))
+  const [viewportWidth, setViewportWidth] = useState(() => Dimensions.get('window').width)
+  const inset = conversation ? CONVERSATION_INSET : 12
+  const chatWidth = Math.max(0, Math.min(viewportWidth - inset * 2, conversation ? CONVERSATION_WIDTH : viewportWidth))
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
   const [menuText, setMenuText] = useState<string | null>(null)
   const [readerText, setReaderText] = useState<string | null>(null)
@@ -389,9 +394,11 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
   // desktop's wide-window column slider so bubbles do not waste a third of the screen;
   // group rows reserve 30px (22px avatar + 8px gap) on the left.
   const narrow = chatWidth < 520
-  const roomOffset = room !== undefined && !flat ? 30 : 0
+  const roomOffset = room !== undefined && layout === 'bubble' ? 30 : 0
   const botSpan = Math.max(0, chatWidth - roomOffset)
-  const botMax = chatWidth === 0 ? 0 : Math.round(Math.min(botSpan * (narrow ? 0.93 : width / 100), botSpan - (narrow ? 8 : 40)))
+  const botMax = layout === 'bubble'
+    ? Math.max(0, Math.round(Math.min(botSpan * (narrow ? 0.93 : width / 100), botSpan - (narrow ? 8 : 40))))
+    : Math.round(chatWidth * (narrow ? 1 : flatWidth / 100))
   const userMax = Math.round(chatWidth * (narrow ? 0.86 : width / 100))
 
   // Sending: the message shows at once and the composer clears; photos travel one
@@ -456,9 +463,9 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
     const all = [...items, ...pending.map(o => o.item)]
     const keys = keysOf(all)
     return groupToolRows(all.map((item, index) => ({
-      item, key: keys[index], stamp: room !== undefined || item.local !== undefined ? undefined : stampOf(all, index),
+      item, key: keys[index], stamp: room !== undefined || item.local !== undefined ? undefined : stampOf(all, index, conversation),
     })))
-  }, [items, pending, room !== undefined])
+  }, [items, pending, room !== undefined, conversation])
   // Expanded tool cards remain list rows, so long runs use the same windowing
   // as the rest of the inverted transcript.
   const rows = useMemo(() => groupedRows.flatMap(row =>
@@ -472,16 +479,16 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
   const admin = room?.admin
 
   const renderRow = useCallback<ListRenderItem<ChatRow>>(({ item: row }) => {
-    if ('tools' in row) return <ToolGroupCard tools={row.tools} p={p} open={openSteps[row.key] === true} onToggle={toggleOf(row.key)} />
+    if ('tools' in row) return <ToolGroupCard tools={row.tools} p={p} conversation={conversation} open={openSteps[row.key] === true} onToggle={toggleOf(row.key)} />
     const { item } = row
     return (
       <ErrorBoundary inline>
         <Item stamp={row.stamp} author={inRoom && item.botId !== undefined ? botsById.get(item.botId) : undefined} admin={inRoom && item.botId !== undefined && item.botId === admin}
-          item={item} p={p} flat={flat} maxWidth={item.kind === 'bot' || item.kind === 'post' ? botMax : userMax} inRoom={inRoom} sessionId={sessionId}
+          item={item} p={p} layout={layout} maxWidth={item.kind === 'bot' || item.kind === 'post' ? botMax : userMax} inRoom={inRoom} sessionId={sessionId}
           onLongPress={setMenuText} onOpenFile={openFile} onSaveFile={saveFile} onRetry={retry} open={openSteps[row.key]} onToggle={toggleOf(row.key)} />
       </ErrorBoundary>
     )
-  }, [inRoom, botsById, admin, p, flat, botMax, userMax, sessionId, openFile, retry, openSteps])
+  }, [inRoom, botsById, admin, p, layout, conversation, botMax, userMax, sessionId, openFile, saveFile, retry, openSteps])
 
   const empty = page !== null && rows.length === 0
   return (
@@ -489,7 +496,7 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
     <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={KEYBOARD_GAP - insets.bottom} style={[styles.screen, { backgroundColor: p.main }]}>
       {header}
       {room !== undefined && (room as { goal?: Goal }).goal ? <GoalBar goal={(room as { goal?: Goal }).goal!} p={p} /> : null}
-      <View style={styles.list} onLayout={event => setChatWidth(event.nativeEvent.layout.width - 24)}>
+      <View style={styles.list} onLayout={event => setViewportWidth(event.nativeEvent.layout.width)}>
         {gone
           ? <Text style={[type.caption, { color: p.ink3, textAlign: 'center', marginTop: 24 }]}>{t('No messages yet')}</Text>
           : page === null && loadError !== null
@@ -506,7 +513,7 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
                 keyExtractor={row => row.key}
                 renderItem={renderRow}
                 extraData={openSteps}
-                contentContainerStyle={styles.listContent}
+                contentContainerStyle={conversation ? styles.conversationContent : styles.listContent}
                 keyboardShouldPersistTaps="handled"
                 keyboardDismissMode="interactive"
                 initialNumToRender={14}
@@ -532,7 +539,7 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
                   if (y <= 80 && unreadBelow > 0) setUnreadBelow(0)
                 }}
                 scrollEventThrottle={100}
-                ListHeaderComponent={inlineTools ? undefined : <Streaming key={sessionId} sessionId={sessionId} p={p} flat={flat} maxWidth={botMax} inRoom={inRoom} />}
+                ListHeaderComponent={inlineTools ? undefined : <Streaming key={sessionId} sessionId={sessionId} p={p} layout={layout} maxWidth={botMax} inRoom={inRoom} />}
                 ListFooterComponent={loadingOlder ? <ActivityIndicator style={{ marginVertical: 12 }} color={p.ink3} /> : undefined}
               />}
         {empty && !gone ? <EmptyChat bot={bot} room={room} bots={team?.bots ?? []} p={p} dark={dark} /> : null}
@@ -547,7 +554,7 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
       </View>
       {bot?.blocked !== undefined ? <BlockedCard bot={bot} p={p} /> : null}
       {bot !== undefined ? <ComputerCards bot={bot} p={p} /> : null}
-      {running && doingBot ? <ActionRow bot={doingBot} doing={doingText} p={p} dark={dark} /> : null}
+      {running && doingBot ? <ActionRow bot={doingBot} doing={doingText} p={p} dark={dark} conversation={conversation} /> : null}
       <Dock question={question} sessionId={sessionId} approvals={approvals} secrets={secrets} connectorRequests={connectorRequests} botName={bot?.name} onOpenConnector={connectorId => { if (connectorCanConnectOnMobile(connectorId)) navigation.navigate('Settings', { screen: 'Connectors', params: { focusId: connectorId }, initial: false }) }} btw={btw} handoff={browserHold} view={team?.views?.[sessionId]} call={call} p={p} expanded={expandedKey} onExpand={setExpandedKey} />
       {fileError ? <Text style={[type.small, { color: p.danger, textAlign: 'center', marginBottom: 4 }]} accessibilityRole="alert">{fileError}</Text> : null}
       {page !== null && loadError !== null ? <Text style={[type.small, { color: p.danger, textAlign: 'center', marginBottom: 4, marginHorizontal: 16 }]} accessibilityRole="alert">{loadError}</Text> : null}
@@ -562,7 +569,7 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
             </Pressable>
           )}
         </View>
-      ) : <Composer key={chatKey} name={bot?.name ?? room?.name ?? ''} running={running} canStop={canStop} canAttach={hello?.capabilities?.includes('send-images') === true} onSend={send} onStop={stop} p={p} />}
+      ) : <Composer key={chatKey} name={bot?.name ?? room?.name ?? ''} conversation={conversation} running={running} canStop={canStop} canAttach={hello?.capabilities?.includes('send-images') === true} onSend={send} onStop={stop} p={p} />}
       <Actions visible={menuText !== null} text={menuText ?? ''} p={p}
         onClose={() => setMenuText(null)}
         onSelect={() => { setReaderTitle(null); setReaderText(menuText); setMenuText(null) }} />
@@ -595,13 +602,13 @@ function EmptyChat({ bot, room, bots, p, dark }: { bot?: Bot; room?: Room; bots:
   )
 }
 
-// As on the desktop, a run of one Bot's bubbles ends with the time of its last one,
-// and each user message carries its own.
-function stampOf(items: ChatItem[], index: number): string | undefined {
+// As on the desktop, each user message has a stamp. Bubble and Flat also show
+// the time after a run of one Bot's replies.
+function stampOf(items: ChatItem[], index: number, conversation: boolean): string | undefined {
   const item = items[index]
   if (typeof item.time !== 'number') return undefined
   if (item.kind === 'user') return messageClock(item.time)
-  if (item.kind !== 'bot' && item.kind !== 'post') return undefined
+  if (conversation || (item.kind !== 'bot' && item.kind !== 'post')) return undefined
   const next = items[index + 1]
   if (next !== undefined && (next.kind === 'bot' || next.kind === 'post') && (next.name ?? '') === (item.name ?? '')) return undefined
   return messageClock(item.time)
@@ -731,7 +738,7 @@ function BlockedCard({ bot, p }: { bot: Bot; p: ReturnType<typeof useTheme>['p']
 // The turn being streamed by the model, per attempt id. It holds its own state so a
 // token redraws this one bubble, not the whole chat; the real item lands with the
 // 'message' event when the turn's text is saved.
-function Streaming({ sessionId, p, flat, maxWidth, inRoom }: { sessionId: string; p: ReturnType<typeof useTheme>['p']; flat: boolean; maxWidth: number; inRoom: boolean }) {
+function Streaming({ sessionId, p, layout, maxWidth, inRoom }: { sessionId: string; p: ReturnType<typeof useTheme>['p']; layout: ChatLayout; maxWidth: number; inRoom: boolean }) {
   const { onFeed } = useTeam()
   const [text, setText] = useState('')
   useEffect(() => {
@@ -746,7 +753,7 @@ function Streaming({ sessionId, p, flat, maxWidth, inRoom }: { sessionId: string
       setText([...attempts.values()].filter(part => part !== '').join('\n\n'))
     })
   }, [onFeed, sessionId])
-  return text === '' ? null : <Item item={{ kind: 'bot', text }} p={p} flat={flat} maxWidth={maxWidth} inRoom={inRoom} sessionId={sessionId} />
+  return text === '' ? null : <Item item={{ kind: 'bot', text }} p={p} layout={layout} maxWidth={maxWidth} inRoom={inRoom} sessionId={sessionId} />
 }
 
 const type = { caption: { fontSize: 12, lineHeight: 16 }, small: { fontSize: 13, lineHeight: 18 }, bubble: { fontSize: 16, lineHeight: 24 }, settingsRow: { fontSize: 16, lineHeight: 22 } }
@@ -755,6 +762,8 @@ const styles = StyleSheet.create({
   loading: { flex: 1 },
   list: { flex: 1 },
   listContent: { paddingVertical: 8, paddingHorizontal: 12 },
+  conversationContent: { alignSelf: 'center', width: '100%', maxWidth: CONVERSATION_WIDTH + 2 * CONVERSATION_INSET,
+    paddingHorizontal: CONVERSATION_INSET, paddingTop: 8, paddingBottom: 24 },
   reader: { flex: 1 },
   empty: { position: 'absolute', left: 24, right: 24, top: '28%', alignItems: 'center' },
   toLatest: { position: 'absolute', right: 14, bottom: 10, width: 38, height: 38, borderRadius: 19, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },

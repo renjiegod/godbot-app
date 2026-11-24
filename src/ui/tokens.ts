@@ -14,8 +14,13 @@ export interface ThemeMode {
 const DARK_INK = '#141414'
 const accentInk = (accent: string) =>
   (luminance(accent) + 0.05) ** 2 > 1.05 * (luminance(DARK_INK) + 0.05) ? DARK_INK : '#ffffff'
+const channels = (hex: string) => [1, 3, 5].map(index => parseInt(hex.slice(index, index + 2), 16))
 const rgba = (hex: string, alpha: number) =>
-  `rgba(${[1, 3, 5].map(index => parseInt(hex.slice(index, index + 2), 16)).join(',')},${alpha})`
+  `rgba(${channels(hex).join(',')},${alpha})`
+const mix = (base: string, tint: string, weight: number) => {
+  const color = channels(tint)
+  return `rgb(${channels(base).map((channel, i) => Math.round(channel * (1 - weight) + color[i] * weight)).join(',')})`
+}
 
 const inks = INKS as Record<string, string[]>
 
@@ -32,7 +37,7 @@ export interface Palette {
   line: string; line2: string; lineWeak: string
   hover: string; active: string
   accent: string; accentInk: string
-  user: string; userInk: string
+  user: string; userInk: string; conversationUser: string
   tagBg: string; tagInk: string
   knob: string
   danger: string; green: string; star: string
@@ -50,7 +55,7 @@ export function palette(dark: boolean, themeId?: string, accent?: string): Palet
     hover: dark ? 'rgba(160,160,160,.12)' : 'rgba(119,119,119,.09)',
     active: dark ? 'rgba(160,160,160,.2)' : 'rgba(119,119,119,.17)',
     accent: use, accentInk: accentInk(use),
-    user: mode.user, userInk: mode.userText,
+    user: mode.user, userInk: mode.userText, conversationUser: mix(mode.bg, use, 0.11),
     tagBg: rgba(mode.text, dark ? 0.09 : 0.06), tagInk: rgba(mode.text, 0.58),
     knob: '#ffffff',
     danger: '#e02135', green: '#00c972', star: '#ff9800',

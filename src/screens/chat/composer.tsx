@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { t } from '../../ui/i18n.ts'
 import { ArrowUpIcon, CloseIcon, PlusIcon, StopIcon } from '../../ui/icons.tsx'
 import { radius, shadow, type as typeScale, type Palette } from '../../ui/tokens.ts'
+import { CONVERSATION_INSET, CONVERSATION_WIDTH } from './layout.ts'
 
 // A photo ready to send: shown from `uri`, sent as base64 JPEG.
 export interface Photo { uri: string; mediaType: string; data: string }
@@ -22,18 +23,15 @@ async function prepare(asset: ImagePicker.ImagePickerAsset): Promise<Photo> {
   return { uri: out.uri, mediaType: 'image/jpeg', data: out.base64 ?? '' }
 }
 
-// The composer card: min height 44, radius 22 (18 when multi-line), level-1
-// shadow; send is a 36px accent circle. While the Bot runs and the draft is
-// empty a stop button shows instead of send. "+" adds photos when the
-// computer takes them.
-export function Composer({ name, running, canStop, canAttach, onSend, onStop, p }: {
-  name: string; running: boolean; canStop: boolean; canAttach: boolean
+export function Composer({ name, conversation, running, canStop, canAttach, onSend, onStop, p }: {
+  name: string; conversation: boolean; running: boolean; canStop: boolean; canAttach: boolean
   onSend: (text: string, photos: Photo[]) => Promise<void>; onStop: () => void; p: Palette
 }) {
   const [text, setText] = useState('')
   const [photos, setPhotos] = useState<Photo[]>([])
   const [preparing, setPreparing] = useState(false)
   const [pickError, setPickError] = useState<string | null>(null)
+  const [focused, setFocused] = useState(false)
   // Float above the home indicator (iOS) or the gesture bar (Android, drawn edge to
   // edge). The matching negative keyboardVerticalOffset in ChatView keeps the card
   // hugging the keyboard.
@@ -62,10 +60,32 @@ export function Composer({ name, running, canStop, canAttach, onSend, onStop, p 
     } finally { setPreparing(false) }
   }
   const multi = text.includes('\n') || text.length > 80 || photos.length > 0
+  const label = t('Message {name}', { name })
+  const input = (
+    <TextInput value={text} onChangeText={setText} placeholder={label} placeholderTextColor={conversation ? p.ink2 : p.ink3}
+      accessibilityLabel={label} multiline onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
+      style={[styles.input, conversation ? styles.conversationInput : { paddingLeft: canAttach ? 2 : 6 }, { color: p.ink }]} />
+  )
+  const attach = canAttach ? (
+    <Pressable accessibilityRole="button" accessibilityLabel={t('Add photos')} onPress={() => void pick()} hitSlop={6}
+      style={[styles.attach, conversation && [styles.conversationAttach, { backgroundColor: p.hover }]]}>
+      <PlusIcon size={20} color={p.ink2} />
+    </Pressable>
+  ) : null
+  const primary = running && canStop && !ready
+    ? <Pressable accessibilityRole="button" accessibilityLabel={t('Stop')} onPress={onStop} hitSlop={6}
+        style={[styles.send, { backgroundColor: p.accent }]}>
+        <StopIcon size={14} />
+      </Pressable>
+    : <Pressable accessibilityRole="button" accessibilityLabel={t('Send')} disabled={!ready} onPress={send} hitSlop={6}
+        style={[styles.send, { backgroundColor: p.accent, opacity: ready ? 1 : 0.35 }]}>
+        <ArrowUpIcon size={18} />
+      </Pressable>
   return (
-    <View style={{ marginBottom: bottom }}>
+    <View style={[conversation && styles.conversationSeat, { marginBottom: bottom }]}>
       {pickError !== null ? <Text style={[typeScale.small, { color: p.danger, textAlign: 'center', marginBottom: 4 }]}>{pickError}</Text> : null}
-      <View style={[styles.card, { backgroundColor: p.card, borderRadius: multi ? radius.composerLong : radius.composer, borderColor: p.line2 }]}>
+      <View style={[conversation ? styles.conversationCard : [styles.card, { borderRadius: multi ? radius.composerLong : radius.composer }],
+        { backgroundColor: p.card, borderColor: conversation && focused ? p.accent : p.line2 }]}>
         {photos.length > 0 || preparing ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={styles.photos} keyboardShouldPersistTaps="handled">
             {photos.map(photo => (
@@ -80,24 +100,12 @@ export function Composer({ name, running, canStop, canAttach, onSend, onStop, p 
             {preparing ? <View style={[styles.photo, { backgroundColor: p.hover, alignItems: 'center', justifyContent: 'center' }]}><ActivityIndicator color={p.ink3} /></View> : null}
           </ScrollView>
         ) : null}
-        <View style={styles.line}>
-          {canAttach ? (
-            <Pressable accessibilityRole="button" accessibilityLabel={t('Add photos')} onPress={() => void pick()} hitSlop={6} style={styles.attach}>
-              <PlusIcon size={20} color={p.ink2} />
-            </Pressable>
-          ) : null}
-          <TextInput value={text} onChangeText={setText} placeholder={t('Message {name}', { name })} placeholderTextColor={p.ink3}
-            multiline style={[styles.input, { color: p.ink, paddingLeft: canAttach ? 2 : 6 }]} accessibilityLabel={t('Message {name}', { name })} />
-          {running && canStop && !ready
-            ? <Pressable accessibilityRole="button" accessibilityLabel={t('Stop')} onPress={onStop} hitSlop={6}
-                style={[styles.send, { backgroundColor: p.accent }]}>
-                <StopIcon size={14} />
-              </Pressable>
-            : <Pressable accessibilityRole="button" accessibilityLabel={t('Send')} disabled={!ready} onPress={send} hitSlop={6}
-                style={[styles.send, { backgroundColor: p.accent, opacity: ready ? 1 : 0.35 }]}>
-                <ArrowUpIcon size={18} />
-              </Pressable>}
-        </View>
+        {conversation ? (
+          <>
+            {input}
+            <View style={styles.actions}>{attach}{primary}</View>
+          </>
+        ) : <View style={styles.line}>{attach}{input}{primary}</View>}
       </View>
     </View>
   )
@@ -105,11 +113,16 @@ export function Composer({ name, running, canStop, canAttach, onSend, onStop, p 
 
 const styles = StyleSheet.create({
   card: { marginHorizontal: 12, paddingHorizontal: 7.5, paddingVertical: 7.5, borderWidth: 0.5, ...shadow(1) },
+  conversationSeat: { alignSelf: 'center', width: '100%', maxWidth: CONVERSATION_WIDTH + 2 * CONVERSATION_INSET, paddingHorizontal: CONVERSATION_INSET },
+  conversationCard: { minHeight: 96, justifyContent: 'space-between', padding: 10, gap: 8, borderWidth: 1, borderRadius: 20 },
   line: { flexDirection: 'row', alignItems: 'flex-end' },
+  actions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end' },
   photos: { gap: 8, paddingHorizontal: 6, paddingTop: 6, paddingBottom: 8 },
   photo: { width: 64, height: 64, borderRadius: 12 },
   unpick: { position: 'absolute', top: -5, right: -5, width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   attach: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  conversationAttach: { marginEnd: 'auto', borderRadius: 18 },
   input: { flex: 1, fontSize: 16, lineHeight: 22, paddingTop: 7, paddingBottom: 7, paddingRight: 6, maxHeight: 130 },
+  conversationInput: { flex: 0, minHeight: 30, paddingHorizontal: 6, paddingTop: 4, paddingBottom: 4 },
   send: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
 })

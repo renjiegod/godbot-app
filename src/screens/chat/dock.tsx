@@ -2,6 +2,7 @@ import { useState } from 'react'
 import * as Haptics from 'expo-haptics'
 import { ChevronRightIcon } from '../../ui/icons.tsx'
 import { ViewCard } from './view.tsx'
+import { CONVERSATION_INSET, CONVERSATION_WIDTH } from './layout.ts'
 import { ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View, Pressable } from 'react-native'
 import Animated, { useReducedMotion, useAnimatedStyle, withRepeat, withTiming, withSpring, useSharedValue, withSequence } from 'react-native-reanimated'
 import { useEffect } from 'react'
@@ -303,7 +304,7 @@ export function HandoffCard({ handoff, botId, onView, call, p , bare = false }: 
   )
 }
 
-export function ActionRow({ bot, doing, p, dark }: { bot: Bot; doing: string; p: Palette; dark: boolean }) {
+export function ActionRow({ bot, doing, p, dark, conversation }: { bot: Bot; doing: string; p: Palette; dark: boolean; conversation: boolean }) {
   const reduced = useReducedMotion()
   const shimmer = useSharedValue(0.35)
   useEffect(() => {
@@ -311,12 +312,13 @@ export function ActionRow({ bot, doing, p, dark }: { bot: Bot; doing: string; p:
     shimmer.value = withRepeat(withSequence(withTiming(1, { duration: 900 }), withTiming(0.35, { duration: 900 })), -1, false)
   }, [reduced])
   const style = useAnimatedStyle(() => ({ opacity: shimmer.value }))
-  return (
-    <View style={styles.action}>
-      <Avatar bot={bot} dark={dark} size={28} ring={p.main} working />
-      <Animated.Text style={[type.rowPreview, { color: p.ink2, marginLeft: 8, flex: 1 }, style]} numberOfLines={1}>{doing}…</Animated.Text>
+  const row = (
+    <View style={[styles.action, conversation && [styles.conversationAction, { borderTopColor: p.line }]]}>
+      <Avatar bot={bot} dark={dark} size={conversation ? 24 : 28} ring={p.main} working />
+      <Animated.Text style={[conversation ? type.small : type.rowPreview, { color: p.ink2, marginLeft: 8, flex: 1 }, style]} numberOfLines={1}>{doing}…</Animated.Text>
     </View>
   )
+  return conversation ? <View style={styles.conversationActionFrame}>{row}</View> : row
 }
 
 const type = typeScale
@@ -355,4 +357,6 @@ const styles = StyleSheet.create({
   secretInput: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, minHeight: 40, paddingVertical: 8, marginTop: 10, fontSize: 14 },
   choice: { flex: 1, minWidth: 104, minHeight: 44, borderRadius: radius.pill, paddingHorizontal: 14, paddingVertical: 8, alignItems: 'center', justifyContent: 'center' },
   action: { flexDirection: 'row', alignItems: 'center', height: 36, marginHorizontal: 12 },
+  conversationActionFrame: { alignSelf: 'center', width: '100%', maxWidth: CONVERSATION_WIDTH + 2 * CONVERSATION_INSET, paddingHorizontal: CONVERSATION_INSET },
+  conversationAction: { marginHorizontal: 0, minHeight: 36, height: 'auto', borderTopWidth: StyleSheet.hairlineWidth, paddingVertical: 6 },
 })

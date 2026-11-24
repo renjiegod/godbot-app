@@ -12,7 +12,6 @@ const MOBILE_SENSE = new Set(['New', 'Light', 'Back', 'Unknown'])
 const MOBILE_ZH: Record<string, string> = {
   '{count} tool calls': '{count} 次工具调用',
   '{count} running': '{count} 项进行中',
-  '{count} failed': '{count} 项失败',
   'Desktop': '桌面',
   'Left arrow': '向左键',
   'Right arrow': '向右键',

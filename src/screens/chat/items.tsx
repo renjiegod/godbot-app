@@ -13,6 +13,7 @@ import { Markdown, hasBlockContent } from './markdown.tsx'
 import { useTeam } from '../../team/context.tsx'
 import { ViewCard } from './view.tsx'
 import { ToolCard } from './tool-card.tsx'
+import type { ChatLayout } from './layout.ts'
 import { handoffTitleOf, relayReplyText, roundEventText, settledQuestionPicks, stripLongNote, type RelayReplyData, type SettledQuestionData } from './settled.ts'
 import { viewAnswerText } from 'deep-view/core'
 
@@ -88,11 +89,12 @@ const originals = new Map<string, string>()
 const ORIGINALS_KEPT = 6
 const dataUri = (value: unknown) => `data:${(value as { mime?: string })?.mime ?? 'image/png'};base64,${(value as { data?: string })?.data ?? ''}`
 
-// One displayItems row (parts.js). Bubbles: radius 18, padding 7×12, Bot on the
-// theme's bubble color, the user on user/userInk. `prefs.width` caps the Bot
-// bubble at min(width%, 100% - 40); flat layout draws Bot text full width.
-export const Item = memo(function Item({ item, p, flat, maxWidth, inRoom, sessionId, open, onToggle, onLongPress, onOpenFile, onSaveFile, onRetry, stamp, author, admin }: { item: ChatItem; p: Palette; flat: boolean; maxWidth: number | string; inRoom: boolean; sessionId?: string; open?: boolean; onToggle?: () => void; stamp?: string; author?: Bot; admin?: boolean; onLongPress?: (text: string) => void; onOpenFile?: (file: FileRef) => void; onSaveFile?: (file: FileRef) => void; onRetry?: (localId: string, discard?: boolean) => void }) {
+// One displayItems row (parts.js). Conversation and Flat draw Bot replies on the chat surface.
+export const Item = memo(function Item({ item, p, layout, maxWidth, inRoom, sessionId, open, onToggle, onLongPress, onOpenFile, onSaveFile, onRetry, stamp, author, admin }: { item: ChatItem; p: Palette; layout: ChatLayout; maxWidth: number; inRoom: boolean; sessionId?: string; open?: boolean; onToggle?: () => void; stamp?: string; author?: Bot; admin?: boolean; onLongPress?: (text: string) => void; onOpenFile?: (file: FileRef) => void; onSaveFile?: (file: FileRef) => void; onRetry?: (localId: string, discard?: boolean) => void }) {
   const { dark } = useTheme()
+  const conversation = layout === 'conversation'
+  const userFill = conversation ? p.conversationUser : p.user
+  const userInk = conversation ? p.ink : p.userInk
   const rowSessionId = item.sessionId ?? sessionId
   const authorBotId = item.botId ?? author?.id
   const wholeFile = item.file?.attachmentId !== undefined ? item.file : item.whole?.file?.attachmentId !== undefined ? item.whole.file : undefined
@@ -125,8 +127,8 @@ export const Item = memo(function Item({ item, p, flat, maxWidth, inRoom, sessio
     ? item.answers.map(answer => [...(answer.selected ?? []), ...(answer.custom ? [answer.custom] : [])].join(', ')).join('\n')
     : bodyJoined
   const longPress = () => { void Haptics.selectionAsync(); onLongPress?.(source) }
-  if (item.kind === 'tool') return <ToolCard item={item} p={p} open={open === true} onToggle={onToggle} />
-  if (item.kind === 'steps') return <Steps item={item} p={p} open={open === true} onToggle={onToggle ?? (() => {})} />
+  if (item.kind === 'tool') return <ToolCard item={item} p={p} conversation={conversation} open={open === true} onToggle={onToggle} />
+  if (item.kind === 'steps') return <Steps item={item} p={p} conversation={conversation} open={open === true} onToggle={onToggle ?? (() => {})} />
   if (item.kind === 'divider') {
     const label = typeof item.time === 'number' ? clockLabel(item.time) : ''
     return (
@@ -237,8 +239,8 @@ export const Item = memo(function Item({ item, p, flat, maxWidth, inRoom, sessio
       </Pressable>
     )
     return (
-      <Pressable onLongPress={longPress} style={[styles.bubble, styles.userBubble, { backgroundColor: p.user, maxWidth }]}>
-        <Text style={[type.bubble, { color: p.userInk }]}>{source}</Text>
+      <Pressable onLongPress={longPress} style={[styles.bubble, styles.userBubble, conversation && styles.conversationUser, { backgroundColor: userFill, maxWidth }]}>
+        <Text style={[type.bubble, { color: userInk }]}>{source}</Text>
       </Pressable>
     )
   }
@@ -250,15 +252,15 @@ export const Item = memo(function Item({ item, p, flat, maxWidth, inRoom, sessio
     const photosOnly = (item.text ?? '') === '' && chips.length === 0 && ((item.imageRefs?.length ?? 0) > 0 || (item.localImages?.length ?? 0) > 0)
     const bubble = (
       <Pressable onLongPress={longPress} onPress={item.local === 'failed' && item.localId !== undefined ? () => onRetry?.(item.localId!) : undefined}
-        style={[styles.bubble, styles.userBubble, { backgroundColor: p.user, maxWidth, width: wide ? maxWidth : undefined, opacity: item.local === 'sending' ? 0.7 : 1 },
+        style={[styles.bubble, styles.userBubble, conversation && styles.conversationUser, { backgroundColor: userFill, maxWidth, width: wide ? maxWidth : undefined, opacity: item.local === 'sending' ? 0.7 : 1 },
           photosOnly ? { backgroundColor: 'transparent', paddingHorizontal: 0, paddingVertical: 0 } : null]}>
-        {item.text ? <Markdown text={item.text} p={p} textColor={p.userInk} bg={p.user} sessionId={rowSessionId} botId={authorBotId} /> : null}
+        {item.text ? <Markdown text={item.text} p={p} textColor={userInk} bg={userFill} sessionId={rowSessionId} botId={authorBotId} /> : null}
         {chips}
         {item.localImages !== undefined && item.localImages.length > 0
           ? <LocalImages uris={item.localImages} />
           : item.imageRefs !== undefined && item.imageRefs.length > 0 && rowSessionId !== undefined
             ? <ImageGrid refs={item.imageRefs} sessionId={rowSessionId} p={p} />
-            : item.images ? <Text style={[type.caption, { color: p.userInk, opacity: 0.8, marginTop: 4 }]}>{t('{count} images', { count: item.images })}</Text> : null}
+            : item.images ? <Text style={[type.caption, { color: userInk, opacity: 0.8, marginTop: 4 }]}>{t('{count} images', { count: item.images })}</Text> : null}
       </Pressable>
     )
     if (item.local === 'failed') return (
@@ -276,7 +278,7 @@ export const Item = memo(function Item({ item, p, flat, maxWidth, inRoom, sessio
         {bubble}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2, marginRight: 2 }}>
           {item.via ? <Text style={[styles.via, { backgroundColor: p.hover, color: p.ink3 }]}>{t('via {platform}', { platform: imPlatform(item.via)?.name ?? item.via })}</Text> : null}
-          {stamp ? <Text style={[type.caption, { color: p.ink3 }]}>{stamp}</Text> : null}
+          {stamp ? <Text style={[type.caption, conversation && styles.conversationStamp, { color: conversation ? p.ink2 : p.ink3 }]}>{stamp}</Text> : null}
         </View>
       </View>
     ) : bubble
@@ -285,7 +287,7 @@ export const Item = memo(function Item({ item, p, flat, maxWidth, inRoom, sessio
   if (bodyTexts.length === 0 && !hasImages && chips.length === 0 && fullMessageLink === null) return null
   // In a group each reply carries its member: avatar, name in the member's color, the
   // admin tag and the time, as the desktop's group rows do.
-  if (inRoom && !flat) {
+  if (inRoom && layout === 'bubble') {
     const wide = bodyTexts.some(hasBlockContent) || hasImages
     return (
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginTop: 6 }}>
@@ -320,9 +322,9 @@ export const Item = memo(function Item({ item, p, flat, maxWidth, inRoom, sessio
   }
   const name = inRoom && item.name ? <Text style={[type.caption, { color: p.ink3, marginBottom: 2, marginLeft: 2 }]}>{item.name}</Text> : null
   const wide = bodyTexts.some(hasBlockContent) || hasImages
-  if (flat) {
+  if (layout !== 'bubble') {
     return (
-      <Pressable onLongPress={longPress} style={{ alignSelf: 'stretch', marginVertical: 4 }}>
+      <Pressable onLongPress={longPress} style={[styles.unboxed, conversation && styles.conversationReply, { maxWidth }]}>
         {name}
         {bodyTexts.length > 0 ? <Markdown text={bodyJoined} p={p} textColor={p.ink} bg={p.main} sessionId={rowSessionId} botId={authorBotId} /> : null}
         {hasImages ? <ImageGrid refs={item.imageRefs!} sessionId={rowSessionId!} p={p} /> : null}
@@ -513,18 +515,19 @@ export function Actions({ visible, text, p, onClose, onSelect }: { visible: bool
 }
 
 // One folded caption row per turn: a tap lists what the tools did.
-function Steps({ item, p, open, onToggle }: { item: ChatItem; p: Palette; open: boolean; onToggle: () => void }) {
+function Steps({ item, p, conversation, open, onToggle }: { item: ChatItem; p: Palette; conversation: boolean; open: boolean; onToggle: () => void }) {
   const tools = item.tools ?? []
   const seconds = typeof item.ms === 'number' ? Math.round(item.ms / 1000) : undefined
+  const summary = tools.length === 1 ? t('Used {count} tool', { count: tools.length }) : t('Used {count} tools', { count: tools.length })
+  const duration = seconds !== undefined && seconds > 0 ? t(' · thought for {seconds}s', { seconds }) : ''
   return (
-    <View style={{ alignSelf: 'center', marginVertical: 4, maxWidth: '92%' }}>
-      <Pressable accessibilityRole="button" onPress={onToggle} style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}>
-        <Text style={[type.caption, { color: p.ink3, textAlign: 'center' }]}>
-          {tools.length === 1 ? t('Used {count} tool', { count: tools.length }) : t('Used {count} tools', { count: tools.length })}{seconds !== undefined && seconds > 0 ? t(' · thought for {seconds}s', { seconds }) : ''}
-        </Text>
+    <View style={conversation ? styles.conversationSteps : styles.steps}>
+      <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} onPress={onToggle}
+        style={({ pressed }) => [conversation && styles.conversationStepsToggle, { opacity: pressed ? 0.7 : 1 }]}>
+        <Text style={[type.caption, { color: conversation ? p.ink2 : p.ink3, textAlign: conversation ? 'left' : 'center' }]}>{summary}{duration}</Text>
       </Pressable>
       {open ? tools.map((tool, index) => (
-        <Text key={`${tool.name}-${index}`} style={[type.caption, { color: p.ink2, textAlign: 'center' }]}>
+        <Text key={`${tool.name}-${index}`} style={[type.caption, { color: p.ink2, textAlign: conversation ? 'left' : 'center' }]}>
           {(tool.label ? t(tool.label) : undefined) ?? tool.name}{tool.ok === false ? t(' — failed') : ''}
         </Text>
       )) : null}
@@ -535,6 +538,13 @@ function Steps({ item, p, open, onToggle }: { item: ChatItem; p: Palette; open: 
 const styles = StyleSheet.create({
   bubble: { borderRadius: radius.bubble, paddingHorizontal: 14, paddingVertical: 9, marginVertical: 2 },
   userBubble: { alignSelf: 'flex-end' },
+  conversationUser: { borderRadius: radius.dialog, marginVertical: 4 },
+  unboxed: { alignSelf: 'stretch', marginVertical: 4 },
+  conversationReply: { marginVertical: 6 },
+  conversationStamp: { fontVariant: ['tabular-nums'] },
+  steps: { alignSelf: 'center', marginVertical: 4, maxWidth: '92%' },
+  conversationSteps: { paddingHorizontal: 6 },
+  conversationStepsToggle: { minHeight: 40, justifyContent: 'center' },
   partDivider: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 12 },
   partLine: { flex: 1, height: StyleSheet.hairlineWidth },
   settledCard: { alignSelf: 'stretch', width: '100%', borderRadius: radius.dialog, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 16, paddingVertical: 12, marginVertical: 6, gap: 8 },

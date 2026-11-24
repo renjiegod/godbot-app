@@ -17,7 +17,10 @@ import { shadow, type as typeScale, useTheme } from '../ui/tokens.ts'
 import { Avatar, RoomAvatar } from '../ui/marks.tsx'
 import { ChevronRightIcon, ClockIcon, FolderIcon, GearIcon, PlusIcon, SearchIcon, SidebarIcon, SideIcon } from '../ui/icons.tsx'
 import { ChatView, prefetchChat } from '../screens/Chat.tsx'
+import { chatLayout } from '../screens/chat/layout.ts'
 import { SessionsButton, SessionSheet, useSessionsAvailable } from '../screens/chat/sessions.tsx'
+import { modelOf } from '../screens/model-menu.tsx'
+import { isLocalModel } from '../team/bot-details.ts'
 import { parallelSessions } from '../team/bot-sessions.ts'
 import { NeedsYou } from '../screens/NeedsYou.tsx'
 import { Settings } from '../screens/Settings.tsx'
@@ -150,8 +153,19 @@ function DrawerContent() {
   )
 }
 
-function Pill({ title, bot, room, bots }: { title: string; bot?: Parameters<typeof Avatar>[0]['bot']; room?: Room; bots: Bot[] }) {
+function Pill({ title, bot, room, bots, conversation, model }: {
+  title: string; bot?: Parameters<typeof Avatar>[0]['bot']; room?: Room; bots: Bot[]; conversation: boolean; model?: string
+}) {
   const { p, dark } = useTheme()
+  if (conversation && bot) return (
+    <View style={styles.conversationIdentity}>
+      <Avatar bot={bot} dark={dark} size={24} ring={p.main} />
+      <View style={styles.conversationTitle}>
+        <Text style={[typeScale.rowPreview, { color: p.ink, fontWeight: '600' }]} numberOfLines={1}>{title}</Text>
+        {model ? <Text style={[typeScale.caption, { color: p.ink2 }]} numberOfLines={1}>{model}</Text> : null}
+      </View>
+    </View>
+  )
   return (
     <View style={[styles.pill, { backgroundColor: p.card, borderColor: p.line2 }]}>
       {bot ? <Avatar bot={bot} dark={dark} size={24} ring={p.card} /> : room ? <RoomAvatar room={room} bots={bots} dark={dark} size={24} ring={p.card} /> : null}
@@ -165,20 +179,24 @@ function Header({ title, bot, room, bots = [], onMenu, onPill, onSide, sessions 
   const { team, online, error } = useTeam()
   const pending = pendingCountOf(team) > 0
   const insets = useSafeAreaInsets()
+  const conversation = chatLayout(team?.prefs?.layout, bot !== undefined) === 'conversation'
+  const currentModel = conversation && bot ? modelOf({ ...bot, model: bot.appliedModel ?? bot.model }, team?.models ?? []) : undefined
+  const model = currentModel && isLocalModel(currentModel.ref) && currentModel.ref.endsWith('/default')
+    ? `${currentModel.provider} · ${currentModel.name}` : currentModel?.name
+  const identity = <Pill title={title} bot={bot} room={room} bots={bots} conversation={conversation} model={model} />
   // The link dropped after the team loaded: the screen keeps what it shows and says so.
   const reconnecting = team !== null && !online
   return (
     <View style={{ backgroundColor: p.main }}>
-    <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: insets.top + 4, paddingBottom: 8, paddingHorizontal: 10 }}>
+    <View style={[styles.chatHeader, { paddingTop: insets.top + 4 }, conversation && styles.conversationHeader]}>
       <Pressable accessibilityRole="button" accessibilityLabel={t('Open team list')} onPress={onMenu} hitSlop={8} style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
         <SidebarIcon size={20} color={p.ink2} />
         {pending ? <View style={{ position: 'absolute', top: 8, right: 8, width: 8, height: 8, borderRadius: 4, backgroundColor: p.accent }} /> : null}
       </Pressable>
-      {/* A long group name ends in an ellipsis inside the pill instead of pushing past the side buttons. */}
-      <View style={{ flex: 1, alignItems: 'center', minWidth: 0 }}>
+      <View style={[styles.chatHeading, conversation && styles.conversationHeading]}>
         {title === '' ? null
           : bot === undefined && room === undefined ? <Text style={[typeScale.headerTitle, { color: p.ink }]} numberOfLines={1}>{title}</Text>
-            : onPill !== undefined ? <Pressable accessibilityRole="button" onPress={onPill} style={{ maxWidth: '100%' }}><Pill title={title} bot={bot} room={room} bots={bots} /></Pressable> : <Pill title={title} bot={bot} room={room} bots={bots} />}
+            : onPill !== undefined ? <Pressable accessibilityRole="button" onPress={onPill} style={{ maxWidth: '100%' }}>{identity}</Pressable> : identity}
       </View>
       {sessions}
       {onSide !== undefined ? (
@@ -187,6 +205,7 @@ function Header({ title, bot, room, bots = [], onMenu, onPill, onSide, sessions 
         </Pressable>
       ) : <View style={{ width: 44 }} />}
     </View>
+    {conversation ? <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: p.line }} /> : null}
     {reconnecting ? (
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingBottom: 6 }} accessibilityRole="alert">
         <ActivityIndicator size="small" color={p.ink3} />
@@ -450,6 +469,12 @@ export default function ShellB() {
 }
 
 const styles = StyleSheet.create({
+  chatHeader: { flexDirection: 'row', alignItems: 'center', paddingBottom: 8, paddingHorizontal: 10 },
+  conversationHeader: { paddingBottom: 4 },
+  chatHeading: { flex: 1, alignItems: 'center', minWidth: 0 },
+  conversationHeading: { alignItems: 'flex-start', paddingStart: 4 },
+  conversationIdentity: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, minWidth: 0 },
+  conversationTitle: { flexShrink: 1, minWidth: 0 },
   needsRow: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 12, marginBottom: 4, borderRadius: 10, paddingHorizontal: 12, height: 44 },
   badge: { minWidth: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
   foot: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingTop: 6 },
