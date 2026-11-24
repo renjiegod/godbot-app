@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import type { TeamState } from '../connection.ts'
 import { demoData } from './demo-team.ts'
 import { ensureUnlock } from './gate.ts'
+import { LOCAL_AGENT_USAGE, type LocalAgentUsageView } from './local-agent-usage.ts'
 import { validateViewAnswer } from 'deep-view/core'
 import type { ChatItem } from '../screens/chat/items.tsx'
 
@@ -257,6 +258,18 @@ const call = useMemo(() => async (endpoint: string, payload: unknown = {}): Prom
         return { ok: true }
       }
       case 'file-text': return { text: '# Release notes\n\n- Drawer lands today\n- Mobile cards render natively\n- Needs-you groups the queue\n', truncated: false }
+      case LOCAL_AGENT_USAGE: {
+        const measured = { tokens: 12000, input: 3000, output: 1000, cacheRead: 8000, cacheWrite: 0, reports: 3, unreported: 0 }
+        const periods = { today: measured, week: measured, month: measured }
+        return {
+          asOf: new Date().toISOString(), ledgerStatus: 'ready', totals: periods,
+          providers: [{
+            route: 'local-codex-cli', name: 'Codex CLI', available: true, periods,
+            configuredAccounts: [{ id: null, name: null, available: true }],
+            accounts: [{ accountId: null, attribution: 'host', periods, models: [{ model: 'gpt', periods }] }],
+          }, { route: 'local-claude-code', name: 'Claude Code', available: false }],
+        } satisfies LocalAgentUsageView
+      }
       case 'usage': return {
         total: { input: 402100, output: 90300 },
         bots: [

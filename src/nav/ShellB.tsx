@@ -24,6 +24,7 @@ import { Settings } from '../screens/Settings.tsx'
 import { TeamList, type ChatTarget } from '../screens/TeamList.tsx'
 import { BotDetails, BotEdit, NewBot, NewGroup, GroupDetails, GroupSettings, Memory, Schedules, Folder, Usage, Computers, Secrets } from '../screens/manage.tsx'
 import { Providers, Connectors, Capabilities, TeamUsage, Location, Updates, About } from '../screens/settings-pages.tsx'
+import { LocalAgentUsage } from '../screens/local-agent-usage.tsx'
 import { Side } from '../screens/side.tsx'
 import { BotBrowser } from '../screens/manage.tsx'
 import type { Bot, Room } from '../connection.ts'
@@ -294,6 +295,7 @@ function SettingsSheet() {
         <SettingsStack.Screen name="Connectors" component={Connectors} />
         <SettingsStack.Screen name="Capabilities" component={Capabilities} />
         <SettingsStack.Screen name="TeamUsage" component={TeamUsage} />
+        <SettingsStack.Screen name="LocalAgentUsage" component={LocalAgentUsage} />
         <SettingsStack.Screen name="Location" component={Location} />
         <SettingsStack.Screen name="Updates" component={Updates} />
         <SettingsStack.Screen name="About" component={About} />

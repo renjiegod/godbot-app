@@ -253,7 +253,8 @@ async function main() {
       await wait('the first transcript', firstMessage)
       await openBotDetails(name)
       const nameInput = await waitFor(nodes => field(nodes, 'Bot name'), 'the Bot name field')
-      await typeInto(nameInput, `${name} edited`, { clear: true, submit: true })
+      // The name field selects its contents on focus. A second clear can race the first typed character.
+      await typeInto(nameInput, `${name} edited`, { submit: true })
       await until(activeBot, value => value?.name === `${name} edited`, 'the Android edit on the Web channel')
       r.write += ', Android rename confirmed through Web'
       await wait('the sessions heading', 'Sessions')
@@ -550,6 +551,35 @@ async function main() {
     const view = await channel('usage', { timeZone: 'UTC' })
     shot('usage')
     r.read = `usage (${view.rows.length} rows, ${view.owners.length} owners); Tokens in/out shown`
+    r.write = '(read only)'
+  })
+
+  await page('local-agent-usage', 'local-agent-usage', async (r) => {
+    const view = await channel('local-agent-usage')
+    const agent = view.providers.find(row => row.periods?.today?.reports)
+      ?? view.providers.find(row => row.route === 'local-codex-cli')
+    if (!agent) throw new Error('The host did not include a local agent')
+    const text = totals => totals?.reports ? `${totals.tokens.toLocaleString('en-US')} ${totals.tokens === 1 ? 'token' : 'tokens'}`
+      : totals?.unreported ? 'Tokens unreported' : 'No usage yet'
+    await openSettingsPage('Local agent usage')
+    await wait('the local agent totals', 'Godbot session tokens')
+    await tapOn('the current UTC day', 'Today (UTC)')
+    const expected = text(agent.periods?.today)
+    const entry = await scrollTo(nodes => nodes.find(node => node.desc.startsWith(agent.name + ', ' + expected)), `${agent.name} with ${expected}`)
+    tap(entry)
+    const account = agent.configuredAccounts?.[0]
+    if (account) {
+      const key = account.id === null ? 'host' : 'sandbox'
+      const totals = agent.accounts?.find(row => row.attribution === key && row.accountId === account.id)?.periods.today
+      const label = `${account.name ?? account.id ?? 'On this computer'} · ${text(totals)}`
+      await scrollTo(nodes => find(nodes, label), 'the local agent account breakdown')
+    }
+    shot('local-agent-usage')
+    const unreported = view.providers.find(row => !row.periods?.today?.reports && row.periods?.today?.unreported)
+    if (unreported) await scrollTo(nodes => nodes.find(node => node.desc.startsWith(unreported.name + ', Tokens unreported')), 'an unreported agent')
+    const missing = view.providers.find(row => !row.available && !row.archived && !row.periods?.today?.reports)
+    if (missing) await scrollTo(nodes => nodes.find(node => node.desc.startsWith(missing.name + ', No usage yet') && node.desc.includes('CLI not detected')), 'an undetected agent')
+    r.read = `${view.providers.length} agents from the host, ${agent.name} shows ${expected} and its account breakdown`
     r.write = '(read only)'
   })
 

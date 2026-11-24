@@ -17,13 +17,13 @@ import { t } from '../ui/i18n.ts'
 import { ChevronLeftIcon, ChevronRightIcon } from '../ui/icons.tsx'
 import { radius, shadow, type as typeScale, useTheme } from '../ui/tokens.ts'
 
-function Screen({ children }: { children: React.ReactNode }) {
+export function Screen({ children }: { children: React.ReactNode }) {
   const { p } = useTheme()
   const insets = useSafeAreaInsets()
   const inSheet = useInSheet()
   return <View style={{ flex: 1, backgroundColor: p.main, paddingTop: inSheet ? 0 : insets.top }}>{children}</View>
 }
-function Back({ title, onBack }: { title: string; onBack: () => void }) {
+export function Back({ title, onBack }: { title: string; onBack: () => void }) {
   const { p } = useTheme()
   return (
     <View style={styles.backRow}>
@@ -33,7 +33,7 @@ function Back({ title, onBack }: { title: string; onBack: () => void }) {
     </View>
   )
 }
-function Section({ label, children }: { label: string; children: React.ReactNode }) {
+export function Section({ label, children }: { label: string; children: React.ReactNode }) {
   const { p } = useTheme()
   const items = Children.toArray(children).filter(Boolean)
   return (
@@ -50,7 +50,7 @@ function Section({ label, children }: { label: string; children: React.ReactNode
     </View>
   )
 }
-function Row({ label, hint, value, onPress, onLongPress, end }: { label: string; hint?: string; value?: string; onPress?: () => void; onLongPress?: () => void; end?: React.ReactNode }) {
+export function Row({ label, hint, value, onPress, onLongPress, end, expanded }: { label: string; hint?: string; value?: string; onPress?: () => void; onLongPress?: () => void; end?: React.ReactNode; expanded?: boolean }) {
   const { p } = useTheme()
   const body = (
     <View style={styles.row}>
@@ -60,10 +60,13 @@ function Row({ label, hint, value, onPress, onLongPress, end }: { label: string;
       </View>
       {value !== undefined ? <Text style={[typeScale.settingsRow, { color: p.ink2, flexShrink: 1, maxWidth: '54%', textAlign: 'right' }]} numberOfLines={1}>{value}</Text> : null}
       {end}
-      {onPress ? <View style={{ flexShrink: 0 }}><ChevronRightIcon size={16} color={p.ink3} /></View> : null}
+      {onPress ? <View style={{ flexShrink: 0, transform: [{ rotate: expanded ? '90deg' : '0deg' }] }}><ChevronRightIcon size={16} color={p.ink3} /></View> : null}
     </View>
   )
-  return onPress || onLongPress ? <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} onLongPress={onLongPress} style={({ pressed }) => pressed ? { backgroundColor: p.hover } : null}>{body}</Pressable> : body
+  return onPress || onLongPress ? <Pressable accessibilityRole="button"
+    accessibilityState={expanded === undefined ? undefined : { expanded }}
+    accessibilityLabel={expanded === undefined ? label : [label, value, hint].filter(Boolean).join(', ')}
+    onPress={onPress} onLongPress={onLongPress} style={({ pressed }) => pressed ? { backgroundColor: p.hover } : null}>{body}</Pressable> : body
 }
 
 // ------------------------------------------------------------ Providers

@@ -144,6 +144,7 @@ export function Settings({ navigation }: { navigation?: any }) {
         <Row label={t('Connectors')} onPress={() => navigation?.navigate('Connectors')} />
         <Row label={t('Capabilities')} onPress={() => navigation?.navigate('Capabilities')} />
         <Row label={t('Usage')} onPress={() => navigation?.navigate('TeamUsage')} />
+        <Row label={t('Local agent usage')} onPress={() => navigation?.navigate('LocalAgentUsage')} />
         <Row label={t('Secrets')} onPress={() => navigation?.navigate('Secrets')} />
         <Row label={t('Location')} onPress={() => navigation?.navigate('Location')} />
         <Row label={t('Updates & diagnostics')} onPress={() => navigation?.navigate('Updates')} />
