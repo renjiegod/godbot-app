@@ -304,7 +304,9 @@ export function HandoffCard({ handoff, botId, onView, call, p , bare = false }: 
   )
 }
 
-export function ActionRow({ bot, doing, p, dark, conversation }: { bot: Bot; doing: string; p: Palette; dark: boolean; conversation: boolean }) {
+// What a Bot is doing, above the composer. In a group, `onPress` opens the work of the
+// member it names (the member's work sheet).
+export function ActionRow({ bot, doing, p, dark, conversation, onPress }: { bot: Bot; doing: string; p: Palette; dark: boolean; conversation: boolean; onPress?: () => void }) {
   const reduced = useReducedMotion()
   const shimmer = useSharedValue(0.35)
   useEffect(() => {
@@ -312,12 +314,16 @@ export function ActionRow({ bot, doing, p, dark, conversation }: { bot: Bot; doi
     shimmer.value = withRepeat(withSequence(withTiming(1, { duration: 900 }), withTiming(0.35, { duration: 900 })), -1, false)
   }, [reduced])
   const style = useAnimatedStyle(() => ({ opacity: shimmer.value }))
-  const row = (
-    <View style={[styles.action, conversation && [styles.conversationAction, { borderTopColor: p.line }]]}>
-      <Avatar bot={bot} dark={dark} size={conversation ? 24 : 28} ring={p.main} working />
-      <Animated.Text style={[conversation ? type.small : type.rowPreview, { color: p.ink2, marginLeft: 8, flex: 1 }, style]} numberOfLines={1}>{doing}…</Animated.Text>
-    </View>
-  )
+  const inner = <>
+    <Avatar bot={bot} dark={dark} size={conversation ? 24 : 28} ring={p.main} working />
+    <Animated.Text style={[conversation ? type.small : type.rowPreview, { color: p.ink2, marginLeft: 8, flex: 1 }, style]} numberOfLines={1}>{doing}…</Animated.Text>
+    {onPress !== undefined ? <ChevronRightIcon size={16} color={p.ink3} /> : null}
+  </>
+  const frame = [styles.action, conversation && [styles.conversationAction, { borderTopColor: p.line }]]
+  const row = onPress !== undefined
+    ? <Pressable testID="member-work-capsule" accessibilityRole="button" accessibilityLabel={`${doing} · ${t('View process')}`} onPress={onPress}
+        style={({ pressed }) => [...frame, pressed && { backgroundColor: p.hover }]}>{inner}</Pressable>
+    : <View style={frame}>{inner}</View>
   return conversation ? <View style={styles.conversationActionFrame}>{row}</View> : row
 }
 

@@ -23,6 +23,8 @@ import { ActionRow, Dock } from './chat/dock.tsx'
 import { Composer, type Photo } from './chat/composer.tsx'
 import { Actions, Item, keysOf, PhotoViewer, PhotoViewerCtx, type ChatItem, type FileRef, type ImageRef } from './chat/items.tsx'
 import { ToolGroupCard } from './chat/tool-card.tsx'
+import { MemberWorkSheet } from './chat/member-work.tsx'
+import { processEntries, workAt, type LineWork, type MemberWorkOpen } from '../team/member-work.ts'
 import { groupToolRows, type ChatRow } from './chat/tool-groups.ts'
 import { chatLayout, CONVERSATION_INSET, CONVERSATION_WIDTH, type ChatLayout } from './chat/layout.ts'
 import { bumpMarkdownImageCache } from './chat/markdown.tsx'
@@ -305,6 +307,15 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
   const [readerTitle, setReaderTitle] = useState<string | null>(null)
   const [fileError, setFileError] = useState<string | null>(null)
   const [photos, setPhotos] = useState<{ sessionId: string; refs: ImageRef[]; index: number } | null>(null)
+  // A group member's work sheet: the member and the turn it opened on. A host that does
+  // not name its members' turns ('member-work') has nothing to open.
+  const [workSheet, setWorkSheet] = useState<MemberWorkOpen | null>(null)
+  useEffect(() => { setWorkSheet(null) }, [chatKey])
+  const memberWork = room !== undefined && hello?.capabilities?.includes('member-work') === true
+  const roomIdForWork = room?.id
+  const openWork = useCallback((botId: string, at: Partial<LineWork>) => {
+    if (roomIdForWork !== undefined) setWorkSheet({ roomId: roomIdForWork, botId, at })
+  }, [roomIdForWork])
   // Save hands the file to the phone: the host sends its bytes, the app writes them
   // to a cache file, and the system share sheet lets Android put it in Downloads or
   // open it in a viewer. A refusal names the reason in the same line as file errors.
@@ -459,12 +470,17 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
     const shown = pending.filter(o => o.known !== undefined && items.some((item, index) => !o.known!.has(keys[index]) && sameMessage(item, o.item)))
     if (shown.length > 0) setOutbox(chatKey, list => list.filter(o => !shown.includes(o)))
   }, [items, pending, chatKey])
-  const groupedRows = useMemo(() => {
+  // `workRows`: the group replies that carry the way into their turn's process.
+  const { groupedRows, workRows } = useMemo(() => {
     const all = [...items, ...pending.map(o => o.item)]
     const keys = keysOf(all)
-    return groupToolRows(all.map((item, index) => ({
-      item, key: keys[index], stamp: room !== undefined || item.local !== undefined ? undefined : stampOf(all, index, conversation),
-    })))
+    const entries = room !== undefined ? processEntries(all) : []
+    return {
+      groupedRows: groupToolRows(all.map((item, index) => ({
+        item, key: keys[index], stamp: room !== undefined || item.local !== undefined ? undefined : stampOf(all, index, conversation),
+      }))),
+      workRows: new Set(keys.filter((_, index) => entries[index])),
+    }
   }, [items, pending, room !== undefined, conversation])
   // Expanded tool cards remain list rows, so long runs use the same windowing
   // as the rest of the inverted transcript.
@@ -485,10 +501,11 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
       <ErrorBoundary inline>
         <Item stamp={row.stamp} author={inRoom && item.botId !== undefined ? botsById.get(item.botId) : undefined} admin={inRoom && item.botId !== undefined && item.botId === admin}
           item={item} p={p} layout={layout} maxWidth={item.kind === 'bot' || item.kind === 'post' ? botMax : userMax} inRoom={inRoom} sessionId={sessionId}
-          onLongPress={setMenuText} onOpenFile={openFile} onSaveFile={saveFile} onRetry={retry} open={openSteps[row.key]} onToggle={toggleOf(row.key)} />
+          onLongPress={setMenuText} onOpenFile={openFile} onSaveFile={saveFile} onRetry={retry} open={openSteps[row.key]} onToggle={toggleOf(row.key)}
+          onOpenWork={memberWork ? openWork : undefined} showWork={workRows.has(row.key)} />
       </ErrorBoundary>
     )
-  }, [inRoom, botsById, admin, p, layout, conversation, botMax, userMax, sessionId, openFile, saveFile, retry, openSteps])
+  }, [inRoom, botsById, admin, p, layout, conversation, botMax, userMax, sessionId, openFile, saveFile, retry, openSteps, memberWork, openWork, workRows])
 
   const empty = page !== null && rows.length === 0
   return (
@@ -554,7 +571,8 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
       </View>
       {bot?.blocked !== undefined ? <BlockedCard bot={bot} p={p} /> : null}
       {bot !== undefined ? <ComputerCards bot={bot} p={p} /> : null}
-      {running && doingBot ? <ActionRow bot={doingBot} doing={doingText} p={p} dark={dark} conversation={conversation} /> : null}
+      {running && doingBot ? <ActionRow bot={doingBot} doing={doingText} p={p} dark={dark} conversation={conversation}
+        onPress={memberWork && roomWork[0] !== undefined && workAt(roomWork[0]) !== undefined ? () => openWork(roomWork[0].botId, workAt(roomWork[0]) ?? {}) : undefined} /> : null}
       <Dock question={question} sessionId={sessionId} approvals={approvals} secrets={secrets} connectorRequests={connectorRequests} botName={bot?.name} onOpenConnector={connectorId => { if (connectorCanConnectOnMobile(connectorId)) navigation.navigate('Settings', { screen: 'Connectors', params: { focusId: connectorId }, initial: false }) }} btw={btw} handoff={browserHold} view={team?.views?.[sessionId]} call={call} p={p} expanded={expandedKey} onExpand={setExpandedKey} />
       {fileError ? <Text style={[type.small, { color: p.danger, textAlign: 'center', marginBottom: 4 }]} accessibilityRole="alert">{fileError}</Text> : null}
       {page !== null && loadError !== null ? <Text style={[type.small, { color: p.danger, textAlign: 'center', marginBottom: 4, marginHorizontal: 16 }]} accessibilityRole="alert">{loadError}</Text> : null}
@@ -585,6 +603,7 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
         </View>
       </Modal>
       <PhotoViewer open={photos} onClose={() => setPhotos(null)} />
+      {memberWork ? <MemberWorkSheet open={workSheet} onClose={() => setWorkSheet(null)} onSwitch={setWorkSheet} /> : null}
     </KeyboardAvoidingView>
     </PhotoViewerCtx.Provider>
   )

@@ -142,7 +142,9 @@ export interface TeamState {
     // `since`: when the turn began (as `turns` keys it per Session); `roomId`: the work
     // runs in that group chat, not in the Bot's own chat.
     bots?: Record<string, { tool?: string; said?: string; note?: string; target?: string; switching?: boolean; folder?: boolean; since?: number; roomId?: string }>
-    rooms?: Record<string, { botId: string; tool?: string; said?: string; note?: string; target?: string }[]>
+    // A member at work in a group: `sessionId` and `turn` name its group Session and the
+    // turn it runs there, which the member's work sheet reads; `count` the tools it ran.
+    rooms?: Record<string, { botId: string; tool?: string; said?: string; note?: string; target?: string; sessionId?: string; turn?: number; since?: number; count?: number }[]>
     approvals?: Approval[]
     waiting?: Record<string, { bots?: string[]; rooms?: string[] }>
     turns?: Record<string, number>

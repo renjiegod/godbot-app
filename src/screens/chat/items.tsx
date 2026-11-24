@@ -14,6 +14,7 @@ import { useTeam } from '../../team/context.tsx'
 import { ViewCard } from './view.tsx'
 import { ToolCard } from './tool-card.tsx'
 import type { ChatLayout } from './layout.ts'
+import { hasProcess, workAt, type LineWork } from '../../team/member-work.ts'
 import { handoffTitleOf, relayReplyText, roundEventText, settledQuestionPicks, stripLongNote, type RelayReplyData, type SettledQuestionData } from './settled.ts'
 import { viewAnswerText } from 'deep-view/core'
 
@@ -66,6 +67,8 @@ export interface ChatItem {
   // A message the phone sent that the computer has not shown back yet.
   local?: 'sending' | 'failed'
   localId?: string
+  // A group line's member turn (mobile.js `workOf`): it opens the member's work sheet.
+  work?: LineWork
 }
 
 // Row keys that stay the same when older pages load above or new rows arrive below,
@@ -90,7 +93,9 @@ const ORIGINALS_KEPT = 6
 const dataUri = (value: unknown) => `data:${(value as { mime?: string })?.mime ?? 'image/png'};base64,${(value as { data?: string })?.data ?? ''}`
 
 // One displayItems row (parts.js). Conversation and Flat draw Bot replies on the chat surface.
-export const Item = memo(function Item({ item, p, layout, maxWidth, inRoom, sessionId, open, onToggle, onLongPress, onOpenFile, onSaveFile, onRetry, stamp, author, admin }: { item: ChatItem; p: Palette; layout: ChatLayout; maxWidth: number; inRoom: boolean; sessionId?: string; open?: boolean; onToggle?: () => void; stamp?: string; author?: Bot; admin?: boolean; onLongPress?: (text: string) => void; onOpenFile?: (file: FileRef) => void; onSaveFile?: (file: FileRef) => void; onRetry?: (localId: string, discard?: boolean) => void }) {
+// `onOpenWork` opens a group member's work sheet on a turn; `showWork` puts the way into
+// this reply's turn on the row (once per run of one turn's replies, member-work.ts).
+export const Item = memo(function Item({ item, p, layout, maxWidth, inRoom, sessionId, open, onToggle, onLongPress, onOpenFile, onSaveFile, onRetry, onOpenWork, showWork, stamp, author, admin }: { item: ChatItem; p: Palette; layout: ChatLayout; maxWidth: number; inRoom: boolean; sessionId?: string; open?: boolean; onToggle?: () => void; stamp?: string; author?: Bot; admin?: boolean; onLongPress?: (text: string) => void; onOpenFile?: (file: FileRef) => void; onSaveFile?: (file: FileRef) => void; onRetry?: (localId: string, discard?: boolean) => void; onOpenWork?: (botId: string, at: Partial<LineWork>) => void; showWork?: boolean }) {
   const { dark } = useTheme()
   const conversation = layout === 'conversation'
   const userFill = conversation ? p.conversationUser : p.user
@@ -148,6 +153,17 @@ export const Item = memo(function Item({ item, p, layout, maxWidth, inRoom, sess
     if (item.role === 'schedule') return <Text style={[type.caption, { color: p.ink3, alignSelf: 'center', marginVertical: 4, paddingHorizontal: 12, textAlign: 'center' }]}>{item.text ? t('Scheduled task: {text}', { text: item.text }) : t('Routine started')}</Text>
     const name = item.name ?? t('a Bot')
     const round = roundEventText(name, item.event, item.text, item.code)
+    // Work going on, or work done with tools, opens its process in the member's work sheet.
+    const at = item.event === 'working' ? workAt(item.work) : item.event === 'done' && hasProcess(item.work) ? item.work : undefined
+    if (round !== undefined && at !== undefined && onOpenWork !== undefined && item.botId !== undefined) {
+      const botId = item.botId
+      return (
+        <Pressable testID="member-work-event" accessibilityRole="button" accessibilityLabel={`${round} · ${t('View process')}`} onPress={() => onOpenWork(botId, at)}
+          style={({ pressed }) => [{ alignSelf: 'center', marginVertical: 2, paddingHorizontal: 12, paddingVertical: 2, borderRadius: radius.item }, pressed && { backgroundColor: p.hover }]}>
+          <Text style={[type.caption, { color: p.ink3, textAlign: 'center' }]}>{round}<Text style={{ color: p.accent }}>{` · ${t('View process')}`}</Text></Text>
+        </Pressable>
+      )
+    }
     if (round !== undefined) return <Text style={[type.caption, { color: p.ink3, alignSelf: 'center', marginVertical: 4, paddingHorizontal: 12, textAlign: 'center' }]}>{round}</Text>
     const label = { request: t('asked for work'), reply: t('replied'), report: t('reported back'), stopped: t('stopped') }[item.role ?? ''] ?? item.role ?? ''
     return <Text style={[type.caption, { color: p.ink3, alignSelf: 'center', marginVertical: 4, paddingHorizontal: 12, textAlign: 'center' }]}>{t('{name} {event}', { name: item.name ?? t('a Bot'), event: label })}</Text>
@@ -285,6 +301,14 @@ export const Item = memo(function Item({ item, p, layout, maxWidth, inRoom, sess
   }
   const hasImages = item.imageRefs !== undefined && item.imageRefs.length > 0 && rowSessionId !== undefined
   if (bodyTexts.length === 0 && !hasImages && chips.length === 0 && fullMessageLink === null) return null
+  // The turn this reply came from ran tools: its process opens in the member's work sheet.
+  const lineWork = inRoom && showWork === true && onOpenWork !== undefined && authorBotId !== undefined && hasProcess(item.work) ? item.work : undefined
+  const workLink = lineWork !== undefined ? (
+    <Pressable testID="member-work-link" accessibilityRole="button" accessibilityLabel={`${t('{count} tool calls', { count: lineWork.tools ?? 0 })} · ${t('View process')}`}
+      onPress={() => onOpenWork!(authorBotId!, lineWork)} hitSlop={8}>
+      <Text style={[type.caption, { color: p.accent }]}>{t('{count} tool calls', { count: lineWork.tools ?? 0 })}</Text>
+    </Pressable>
+  ) : null
   // In a group each reply carries its member: avatar, name in the member's color, the
   // admin tag and the time, as the desktop's group rows do.
   if (inRoom && layout === 'bubble') {
@@ -297,6 +321,7 @@ export const Item = memo(function Item({ item, p, layout, maxWidth, inRoom, sess
             <Text style={[type.caption, { color: author !== undefined ? inkColor(author.color, dark) : p.ink2, fontWeight: '500', flexShrink: 1 }]} numberOfLines={1}>{item.name ?? author?.name ?? ''}</Text>
             {admin ? <Text style={[styles.via, { backgroundColor: p.hover, color: p.ink3 }]}>{t('Admin')}</Text> : null}
             {typeof item.time === 'number' ? <Text style={[type.caption, { color: p.ink3 }]}>{messageClock(item.time)}</Text> : null}
+            {workLink}
           </View>
           {bodyTexts.map((partText, bi) => {
             const last = bi === bodyTexts.length - 1
@@ -320,7 +345,10 @@ export const Item = memo(function Item({ item, p, layout, maxWidth, inRoom, sess
       </View>
     )
   }
-  const name = inRoom && item.name ? <Text style={[type.caption, { color: p.ink3, marginBottom: 2, marginLeft: 2 }]}>{item.name}</Text> : null
+  const nameText = inRoom && item.name ? <Text style={[type.caption, { color: p.ink3 }]}>{item.name}</Text> : null
+  const name = nameText !== null || workLink !== null
+    ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 2, marginLeft: 2 }}>{nameText}{workLink}</View>
+    : null
   const wide = bodyTexts.some(hasBlockContent) || hasImages
   if (layout !== 'bubble') {
     return (

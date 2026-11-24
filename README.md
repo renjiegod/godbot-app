@@ -31,7 +31,7 @@ Open a Bot and send a message to confirm your link. Use **Settings → Computers
 
 ## What you can do
 
-- **Stay in the conversation.** Read replies, send messages or attachments, and follow individual Bots or group chats.
+- **Stay in the conversation.** Read replies, send messages or attachments, and follow individual Bots or group chats. In a group, open a member's work to watch its tool calls as they run, and stop it.
 - **Respond to approvals.** Open **Needs you** for questions and approval requests from your team.
 - **Manage the team.** Edit Bots and groups, review memory and schedules, and inspect team usage and settings.
 

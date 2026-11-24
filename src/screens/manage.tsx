@@ -26,6 +26,9 @@ import { inkColor, radius, shadow, type as typeScale, useTheme, type Palette } f
 import type { Bot, Room, TeamState } from '../connection.ts'
 import { capabilityStatusText } from '../team/capabilities.ts'
 import { modelOf, ModelMenu, ModelPicker } from './model-menu.tsx'
+import { MemberWorkSheet } from './chat/member-work.tsx'
+import { workAt, type MemberWorkOpen, type RoomWork } from '../team/member-work.ts'
+import { workPhrase } from '../ui/phrases.ts'
 
 export const SHAPES = ['acorn', 'berry', 'bunny', 'gem', 'gumdrop', 'kitty', 'moon', 'peanut', 'star', 'wave']
 export const COLORS = ['black', 'brown', 'red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'violet', 'magenta', 'gray', 'aurora']
@@ -826,9 +829,13 @@ const ROOM_MODES: [string, string][] = [['admin', 'Admin leads'], ['everyone', '
 // admin marked, the goal, who answers, memory and usage. Its gear opens the group settings.
 export function GroupDetails({ route, navigation }: any) {
   const { p, dark } = useTheme()
-  const { team } = useTeam()
+  const { team, hello } = useTeam()
+  // A member at work here shows what it does, and opens its work as the group chat does.
+  const [workSheet, setWorkSheet] = useState<MemberWorkOpen | null>(null)
   const room = roomOf(team, route.params?.roomId ?? '')
   if (room === undefined) return <Screen title=""><BackRow title="" onBack={() => navigation.goBack()} /></Screen>
+  const memberWork = hello?.capabilities?.includes('member-work') === true
+  const working = (team?.work?.rooms?.[room.id] ?? []) as RoomWork[]
   const bots = team?.bots ?? []
   const members = (room.members ?? []).map(id => botOf(team, id)).filter((bot): bot is Bot => bot !== undefined)
   const admin = botOf(team, room.admin ?? '')
@@ -853,18 +860,31 @@ export function GroupDetails({ route, navigation }: any) {
               <Text style={[typeScale.small, { color: p.ink3 }]}>{t('Add a notice in group settings')}</Text>
             </Pressable>}
         <DetailTitle text={t('Members · {count}', { count: members.length })} />
-        {members.map(member => (
-          <Pressable key={member.id} accessibilityRole="button" onPress={() => navigation.navigate('BotDetails', { botId: member.id })} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 48 }}>
-            <Avatar bot={member} dark={dark} size={32} ring={p.main} />
-            <View style={{ flex: 1 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Text style={[typeScale.settingsRow, { color: p.ink }]} numberOfLines={1}>{member.name}</Text>
-                {member.id === room.admin ? <Text style={{ fontSize: 11, lineHeight: 16, paddingHorizontal: 6, borderRadius: 6, overflow: 'hidden', backgroundColor: p.hover, color: p.ink3 }}>{t('Admin')}</Text> : null}
+        {members.map(member => {
+          const entry = working.find(item => item.botId === member.id)
+          const at = memberWork ? workAt(entry) : undefined
+          return (
+            <Pressable key={member.id} accessibilityRole="button" onPress={() => navigation.navigate('BotDetails', { botId: member.id })} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 48 }}>
+              <Avatar bot={member} dark={dark} size={32} ring={p.main} working={entry !== undefined} />
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={[typeScale.settingsRow, { color: p.ink }]} numberOfLines={1}>{member.name}</Text>
+                  {member.id === room.admin ? <Text style={{ fontSize: 11, lineHeight: 16, paddingHorizontal: 6, borderRadius: 6, overflow: 'hidden', backgroundColor: p.hover, color: p.ink3 }}>{t('Admin')}</Text> : null}
+                </View>
+                {entry !== undefined
+                  ? <Text style={[typeScale.caption, { color: p.ink2 }]} numberOfLines={1}>{`${workPhrase(entry)}…`}</Text>
+                  : member.role ? <Text style={[typeScale.caption, { color: p.ink3 }]} numberOfLines={1}>{member.role}</Text> : null}
               </View>
-              {member.role ? <Text style={[typeScale.caption, { color: p.ink3 }]} numberOfLines={1}>{member.role}</Text> : null}
-            </View>
-          </Pressable>
-        ))}
+              {at !== undefined ? (
+                <Pressable accessibilityRole="button" accessibilityLabel={`${t('View process')} · ${member.name}`} hitSlop={6}
+                  onPress={() => setWorkSheet({ roomId: room.id, botId: member.id, at })}
+                  style={({ pressed }) => ({ minHeight: 32, paddingHorizontal: 12, borderRadius: radius.pill, justifyContent: 'center', backgroundColor: pressed ? p.active : p.hover })}>
+                  <Text style={[typeScale.small, { color: p.ink2 }]}>{t('View process')}</Text>
+                </Pressable>
+              ) : null}
+            </Pressable>
+          )
+        })}
         <DetailTitle text={t('Who answers')} />
         <Text style={[typeScale.small, { color: p.ink }]}>{mode === 'admin' ? t('Admin leads') : t('Everyone')}</Text>
         {team?.memory === false ? null : (
@@ -879,6 +899,7 @@ export function GroupDetails({ route, navigation }: any) {
           </>
         )}
       </ScrollView>
+      {memberWork ? <MemberWorkSheet open={workSheet} onClose={() => setWorkSheet(null)} onSwitch={setWorkSheet} /> : null}
     </Screen>
   )
 }
