@@ -325,7 +325,10 @@ async function main() {
       tap(await scrollTo(nodes => find(nodes, 'Save'), 'Save the failover policy'))
       await until(hostBot, entry => entry.failover?.bots?.[0] === main.id, 'the Android failover policy on Web')
       await channel('update-bot', { id: bot.id, failover: null })
-      await wait('failover disabled after the Web edit', 'Disabled')
+      await relaunch()
+      await openBotDetails(bot.name)
+      await tapOn('Edit Bot', 'Edit Bot')
+      await scrollTo(nodes => find(nodes, 'Disabled'), 'failover disabled after the Web edit')
       shot('failover')
       r.read = 'Web description, memory edit and failover policy read on Android'
       r.write = 'Android description, memory and failover policy confirmed through Web'
