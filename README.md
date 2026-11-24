@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/icon.png" width="104" alt="">
+<img src="assets/godbot-icon.svg" width="104" alt="">
 
 <h1>Godbot for Android</h1>
 
