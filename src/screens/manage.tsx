@@ -2,7 +2,7 @@
 // Bot and group management screens, mirroring the desktop details drawer and
 // settings forms: Bot details, Edit Bot, Create Bot, group settings, and the
 // "new" sheet. Every write goes through the same endpoints the desktop calls.
-import { Children, Fragment, useCallback, useContext, useEffect, useState } from 'react'
+import { Children, Fragment, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { useIsFocused } from '@react-navigation/native'
 import { Alert, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -18,6 +18,7 @@ import { botPrivacyBlock, isLocalModel, modelRoute, sessionFigures, sessionUsage
 import { botSessions, sessionLabel } from '../team/bot-sessions.ts'
 import { SessionRow, useSessionsAvailable, useSessionSwitch } from './chat/sessions.tsx'
 import { connectorRows } from '../team/connectors.ts'
+import { BotFailoverEditor, FailoverActivity } from './bot-failover.tsx'
 import { folderPlan, type FolderPlan, type FoldersView } from '../team/folders.ts'
 import { t, timeLabel, weekdayShort } from '../ui/i18n.ts'
 import { CheckIcon, ChevronLeftIcon, ChevronRightIcon, GearIcon, PlusIcon } from '../ui/icons.tsx'
@@ -587,7 +588,8 @@ function BotCapabilities({ bot, team, run, writable = true }: { bot: Bot; team: 
 
 export function BotEdit({ route, navigation }: any) {
   const { p, dark } = useTheme()
-  const { team, online } = useTeam()
+  const { team, online, hello } = useTeam()
+  const [failoverOpen, setFailoverOpen] = useState(false)
   const { run, error } = useWrite(navigation)
   const open = useOpenWhenListed(navigation)
   const bot = botOf(team, route.params?.botId ?? '')
@@ -599,6 +601,9 @@ export function BotEdit({ route, navigation }: any) {
   const main = isMain(team, bot.id)
   const primary = team?.mainBotId === bot.id
   const privacyBlock = botPrivacyBlock(bot, team)
+  const section = team?.sections?.find(entry => entry.id === bot.sectionId)
+  const hasFailover = hello?.capabilities.includes('bot-failover')
+  const locked = Boolean(bot.accountProfileId || (bot.model ?? bot.appliedModel)?.startsWith('ag-ui-'))
   return (
     <Screen title={bot.name}>
       <BackRow title={t('Settings')} onBack={() => navigation.goBack()} />
@@ -627,6 +632,13 @@ export function BotEdit({ route, navigation }: any) {
         <Section label={t('Model')}>
           <View style={{ padding: 12 }}><ModelMenu bot={bot} readOnly={!writable} onManage={() => navigation.navigate('Settings', { screen: 'Providers', initial: false })} /></View>
         </Section>
+        {hasFailover && <Section label={t('Failover')}>
+          <Row label={t(bot.failover ? 'Enabled' : 'Disabled')} hint={locked ? t('This Bot uses a dedicated Agent binding.') : undefined} />
+          {writable && !locked && (failoverOpen
+            ? <BotFailoverEditor key={bot.id} bot={bot} team={team} save={failover => save({ failover })} close={() => setFailoverOpen(false)} />
+            : <Row label={t('Configure failover')} onPress={() => setFailoverOpen(true)} />)}
+          {bot.failoverHistory?.map(row => <FailoverActivity key={row.id} row={row} navigation={navigation} />)}
+        </Section>}
         <Section label={t('Working folder')}>
           <View style={{ padding: 12 }}><BotFolder bot={bot} navigation={navigation} writable={writable} /></View>
         </Section>
@@ -640,6 +652,9 @@ export function BotEdit({ route, navigation }: any) {
         <BotCapabilities bot={bot} team={team} run={run} writable={writable} />
         {team?.memory === false ? null : <Section label={t('Memory')}>
           <Row label={t("Manage {name}'s memory", { name: bot.name })} onPress={() => navigation.navigate('Memory', { id: bot.id, name: bot.name })} />
+        </Section>}
+        {section && hello?.capabilities.includes('section-context') && <Section label={section.name}>
+          <Row label={t('Section description and memory')} onPress={() => navigation.navigate('Memory', { id: section.id, name: section.name, section: true })} />
         </Section>}
         <Section label={t('Scheduled tasks')}>
           <Row label={t('Schedules')} onPress={() => navigation.navigate('Schedules', { botId: bot.id, name: bot.name, sessionId: bot.sessionId })} />
@@ -1029,12 +1044,25 @@ export function NewGroup({ navigation }: any) {
 // ------------------------------------------------------------ Memory
 
 export function Memory({ route, navigation }: any) {
+  const { computer } = useTeam()
+  const scope = route.params?.section === true ? 'section' : route.params?.group === true ? 'room' : 'bot'
+  return <MemoryView key={`${computer?.hostDeviceId ?? ''}:${scope}:${route.params?.id ?? ''}`} route={route} navigation={navigation} />
+}
+
+function MemoryView({ route, navigation }: any) {
   const { p } = useTheme()
-  const { call } = useTeam()
+  const { call, team, online } = useTeam()
   const id = String(route.params?.id ?? '')
-  const name = String(route.params?.name ?? '')
   const isGroup = route.params?.group === true
+  const isSection = route.params?.section === true
+  const section = isSection ? team?.sections?.find(entry => entry.id === id) : undefined
+  const name = section?.name ?? String(route.params?.name ?? '')
+  const memoryEnabled = team?.memory !== false
+  const writable = online && !team?.readOnly
+  const owner = useMemo(() => isSection ? { sectionId: id } : isGroup ? { roomId: id } : { botId: id }, [id, isGroup, isSection])
   const [view, setView] = useState<{ summary?: { text?: string; at?: number } | string | null; entries?: { scope: string; topic: string | null; text: string; added?: string | null; by?: string | null; source?: string | null }[]; error?: string | null } | null>(null)
+  const [descriptionDraft, setDescriptionDraft] = useState<string | null>(null)
+  const [savingDescription, setSavingDescription] = useState(false)
   const [asking, setAsking] = useState(false)
   const [question, setQuestion] = useState('')
   const [answer, setAnswer] = useState<string | null>(null)
@@ -1043,10 +1071,9 @@ export function Memory({ route, navigation }: any) {
   // What the computer said when a read or write failed (an entry too long, memory off, …).
   const [error, setError] = useState<string | null>(null)
   const failed = (f: { code?: string; message?: string }) => { if (f?.code !== 'unlock/canceled') setError(f?.message ?? String(f)) }
-  const owner = isGroup ? { roomId: id } : { botId: id }
   const load = useCallback(() => {
-    void call('memory-view', isGroup ? { roomId: id } : { botId: id }).then(v => setView(v as typeof view), failed)
-  }, [call, id, isGroup])
+    if (memoryEnabled) void call('memory-view', owner).then(v => setView(v as typeof view), failed)
+  }, [call, owner, memoryEnabled])
   useEffect(() => { load() }, [load])
   const openEditor = (next: NonNullable<typeof editor>) => { setError(null); setEditor(next) }
   const forget = (entry: { scope: string; topic: string | null; text: string }) =>
@@ -1055,7 +1082,7 @@ export function Memory({ route, navigation }: any) {
       void call('memory-forget', { ...owner, scope: entry.scope, topic: entry.topic, text: entry.text }).then(load, failed)
     }, entry.text)
   const saveEditor = () => {
-    if (editor === null || !editor.text.trim() || saving) return
+    if (!writable || editor === null || !editor.text.trim() || saving) return
     const existing = editor.index !== null ? view?.entries?.[editor.index] : undefined
     const body = { ...owner, scope: editor.scope, topic: editor.topic.trim() || null, text: existing?.text ?? '', next: editor.text.trim() }
     const endpoint = existing === undefined ? 'memory-add' : 'memory-edit'
@@ -1069,49 +1096,73 @@ export function Memory({ route, navigation }: any) {
   }
   const ask = () => { if (!question.trim()) return; setAsking(true); setError(null); void call('memory-ask', { ...owner, text: question.trim() }).then(v => { const r = v as { reply?: string; view?: typeof view }; setAnswer(typeof r.reply === 'string' ? r.reply : null); if (r.view !== undefined) setView(r.view) }, failed).finally(() => setAsking(false)) }
   const summary = memorySummaryText(view?.summary)
+  const saveDescription = async () => {
+    if (!section || !writable || savingDescription || descriptionDraft === null) return
+    setError(null)
+    setSavingDescription(true)
+    try {
+      await call('section-save', { id, description: descriptionDraft })
+      setDescriptionDraft(null)
+    } catch (failure) { failed(failure as Error) }
+    finally { setSavingDescription(false) }
+  }
   return (
     <Screen title={name}>
-      <BackRow title={t('Memory')} onBack={() => navigation.goBack()} />
-      <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
+      <BackRow title={t(isSection ? 'Section description and memory' : 'Memory')} onBack={() => navigation.goBack()} />
+      <ScrollView contentContainerStyle={{ paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+        {section && <Section label={t('Section description')}>
+          <View style={styles.row}>
+            <TextInput accessibilityLabel={t('Section description')} value={descriptionDraft ?? section.description ?? ''}
+              multiline editable={writable && !savingDescription} maxLength={4000} onChangeText={setDescriptionDraft}
+              placeholder={t('Section description')} placeholderTextColor={p.ink3}
+              style={[typeScale.settingsRow, { color: p.ink, flex: 1, minHeight: 80, textAlignVertical: 'top' }]} />
+          </View>
+          {writable && <Row label={t('Save description')} disabled={savingDescription || descriptionDraft === null ||
+            descriptionDraft.trim() === (section.description ?? '')} onPress={() => void saveDescription()} />}
+          <Row label={t('The section description and memory are available to every Bot in this section.')} />
+        </Section>}
+        {isSection && !section && <Row label={t('Unknown section')} disabled />}
+        {isSection && !memoryEnabled && <Row label={t('Memory is turned off on this host')} disabled />}
         {error !== null && editor === null ? <Text style={[typeScale.small, { color: p.danger, marginHorizontal: 18, marginTop: 14 }]}>{error}</Text> : null}
         {summary !== null ? <Text style={[typeScale.caption, { color: p.ink3, margin: 18 }]}>{summary}</Text> : null}
-        <View style={[styles.card, { backgroundColor: p.card, borderColor: p.line, marginTop: 14 }]}>
+        {!isSection && <View style={[styles.card, { backgroundColor: p.card, borderColor: p.line, marginTop: 14 }]}>
           <View style={styles.row}>
             <TextInput style={[typeScale.settingsRow, { color: p.ink, flex: 1 }]} value={question} onChangeText={setQuestion}
               placeholder={t('Ask memory')} placeholderTextColor={p.ink3} onSubmitEditing={ask} />
             <Pressable accessibilityRole="button" onPress={ask}><Text style={[typeScale.settingsRow, { color: p.accent }]}>{asking ? '…' : t('Ask')}</Text></Pressable>
           </View>
           {answer !== null ? <Text style={[typeScale.settingsRow, { color: p.ink, paddingHorizontal: 16, paddingBottom: 12 }]}>{answer}</Text> : null}
-        </View>
-        <Section label={t('{count} entries', { count: view?.entries?.length ?? 0 })}>
+        </View>}
+        {memoryEnabled && (!isSection || section) && <Section label={isSection ? t('Shared section memory') : t('{count} entries', { count: view?.entries?.length ?? 0 })}>
+          {view === null && !error ? <Row label={t('Loading…')} disabled /> : null}
           {(view?.entries ?? []).map((entry, i) => {
             const by = entry.source === 'memory panel' ? t('by you') : entry.by ? t('by {name}', { name: entry.by }) : null
             const meta = [entry.added, by].filter(Boolean).join(' · ')
             return (
-              <Pressable key={i} accessibilityRole="button" onPress={() => openEditor({ index: i, scope: entry.scope, topic: entry.topic ?? '', text: entry.text })} style={styles.row}>
+              <Pressable key={i} accessibilityRole="button" disabled={!writable} onPress={() => openEditor({ index: i, scope: entry.scope, topic: entry.topic ?? '', text: entry.text })} style={styles.row}>
                 <View style={{ flex: 1 }}>
                   {entry.topic ? <Text style={[typeScale.small, { color: p.ink3 }]}>{entry.topic}</Text> : null}
                   <Text style={[typeScale.settingsRow, { color: p.ink }]}>{entry.text}</Text>
                   {meta !== '' ? <Text style={[typeScale.small, { color: p.ink3, marginTop: 2 }]}>{meta}</Text> : null}
                 </View>
-                <Pressable accessibilityRole="button" accessibilityLabel={t('Remove from memory')} onPress={() => forget(entry)} hitSlop={8}
+                {writable && <Pressable accessibilityRole="button" accessibilityLabel={t('Remove from memory')} onPress={() => forget(entry)} hitSlop={8}
                   style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}>
                   <Text style={{ color: p.ink3, fontSize: 17 }}>×</Text>
-                </Pressable>
+                </Pressable>}
               </Pressable>
             )
           })}
           {view !== null && (view.entries ?? []).length === 0 ? <Row label={t('Nothing saved yet')} disabled /> : null}
-          <Row label={t('Add')} onPress={() => openEditor({ index: null, scope: 'own', topic: '', text: '' })} />
-        </Section>
+          {view !== null && writable && <Row label={t('Add')} onPress={() => openEditor({ index: null, scope: isSection ? 'section' : isGroup ? 'group' : 'own', topic: '', text: '' })} />}
+        </Section>}
       </ScrollView>
       <Modal visible={editor !== null} transparent animationType="fade" onRequestClose={() => setEditor(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalWrap}>
           <Pressable style={styles.scrim} onPress={() => setEditor(null)} />
           <View style={[styles.sheet, { backgroundColor: p.card, borderColor: p.line }]}>
-            <View style={styles.row}><TextInput style={[typeScale.settingsRow, { color: p.ink, flex: 1 }]} value={editor?.topic ?? ''} onChangeText={topic => setEditor(prev => prev === null ? null : { ...prev, topic })} placeholder={t('Topic')} placeholderTextColor={p.ink3} /></View>
+            <View style={styles.row}><TextInput style={[typeScale.settingsRow, { color: p.ink, flex: 1 }]} editable={editor?.index === null} value={editor?.topic ?? ''} onChangeText={topic => setEditor(prev => prev === null ? null : { ...prev, topic })} placeholder={t(isSection ? 'Memory topic' : 'Topic')} placeholderTextColor={p.ink3} /></View>
             <View style={[styles.divider, { backgroundColor: p.line }]} />
-            <View style={styles.row}><TextInput style={[typeScale.settingsRow, { color: p.ink, flex: 1, minHeight: 80, maxHeight: 180, textAlignVertical: 'top' }]} value={editor?.text ?? ''} onChangeText={text => setEditor(prev => prev === null ? null : { ...prev, text })} placeholder={t('Text')} placeholderTextColor={p.ink3} multiline autoFocus /></View>
+            <View style={styles.row}><TextInput style={[typeScale.settingsRow, { color: p.ink, flex: 1, minHeight: 80, maxHeight: 180, textAlignVertical: 'top' }]} value={editor?.text ?? ''} onChangeText={text => setEditor(prev => prev === null ? null : { ...prev, text })} placeholder={t(isSection ? 'Memory entry' : 'Text')} placeholderTextColor={p.ink3} multiline autoFocus /></View>
             {error !== null ? <Text style={[typeScale.small, { color: p.danger, paddingHorizontal: 16, paddingBottom: 8 }]}>{error}</Text> : null}
             <View style={[styles.divider, { backgroundColor: p.line }]} />
             <View style={styles.row}>

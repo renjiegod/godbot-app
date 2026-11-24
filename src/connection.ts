@@ -6,6 +6,27 @@ import type { ConnectorsView } from './team/connectors.ts'
 
 type BotResult<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } }
 
+export type FailoverTrigger = 'timeout' | 'network' | 'authentication' | 'quota' | 'agent'
+export interface FailoverPolicy {
+  triggers: FailoverTrigger[]
+  agents: string[]
+  bots: string[]
+  timeoutSeconds: number | null
+}
+export interface FailoverEvent {
+  id: string
+  kind: 'agent' | 'bot'
+  sessionId: string
+  status: 'switched' | 'queued' | 'running' | 'completed' | 'failed' | 'exhausted' | 'stopped'
+  trigger: FailoverTrigger
+  from: string
+  at: number
+  target?: string
+  targetBotId?: string
+  targetSessionId?: string
+  roomId?: string
+}
+
 export interface Bot {
   id: string
   name: string
@@ -28,6 +49,8 @@ export interface Bot {
   main?: boolean
   private?: boolean
   instructions?: string
+  failover?: FailoverPolicy | null
+  failoverHistory?: FailoverEvent[]
   sessionId?: string
   parts?: string[]
   partOrder?: string[]
@@ -123,7 +146,7 @@ export interface TeamState {
   // Each part of a Bot's own chat by the first thing the user asked in it (part-titles.js).
   // Sent by a host whose Bot chats go on in the background while another part is open.
   partTitles?: Record<string, string>
-  sections?: { id: string; name: string; collapsed?: boolean; color?: string }[]
+  sections?: { id: string; name: string; collapsed?: boolean; color?: string; description?: string }[]
   memory?: boolean
   questions?: Record<string, Question>
   views?: Record<string, ShownView>

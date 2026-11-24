@@ -119,11 +119,12 @@ export function registerTheme(id, theme) {
 export const allThemes = () => ({ ...THEMES, ...customThemes })
 
 // How chat messages are drawn; a value the plugin does not know reads as the default.
-// A width is a percent of the column: the bubbles' in either layout, the text's in the
-// flat one.
+// The widths measure the user bubble and the unboxed reply against the column.
 export const MESSAGE_WIDTH = { min: 50, max: 100, step: 5 }
 const percent = (value, initial) => (Number.isInteger(value) && value >= MESSAGE_WIDTH.min && value <= MESSAGE_WIDTH.max ? value : initial)
-export const layoutOf = prefs => (prefs?.layout === 'flat' ? 'flat' : 'bubble')
+export const layoutOf = prefs => (prefs?.layout === 'flat' || prefs?.layout === 'bubble' ? prefs.layout : 'conversation')
+export const usesConversationLayout = (roster, sessionId) =>
+  Boolean(roster.byId[sessionId]) && !roster.roomsById[sessionId] && layoutOf(roster.prefs) === 'conversation'
 export const effectsOf = prefs => (prefs?.effects === 'reduced' || prefs?.effects === 'off' ? prefs.effects : 'full')
 export const thinkingShown = prefs => prefs?.thinking === true
 export const widthOf = prefs => percent(prefs?.width, 80)

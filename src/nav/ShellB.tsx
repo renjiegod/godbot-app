@@ -123,7 +123,8 @@ function DrawerContent() {
           query={searching ? query : ''} current={current} />
       </View>
       {menu && <SidebarMenu key={menu.kind} menu={menu} onChange={setMenu}
-        onCreate={openScreen} onSettings={showSettings} />}
+        onCreate={openScreen} onSettings={showSettings}
+        onSectionContext={section => openScreen('Memory', { id: section.id, name: section.name, section: true })} />}
       {!DEMO && (
         <Pressable accessibilityRole="button" onPress={() => computers.machines(team?.prefs)}
           style={[styles.remoteComputers, { borderTopColor: p.line }]}>

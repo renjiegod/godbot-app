@@ -13,15 +13,16 @@ export type SidebarMenuView =
   | { kind: 'section'; section: RosterSection }
   | { kind: 'name'; section?: RosterSection; entryId?: string }
 
-export function SidebarMenu({ menu, onChange, onCreate, onSettings }: {
+export function SidebarMenu({ menu, onChange, onCreate, onSettings, onSectionContext }: {
   menu: SidebarMenuView
   onChange: (menu: SidebarMenuView | null) => void
   onCreate: (target: 'NewBot' | 'NewGroup') => void
   onSettings: (entry: RosterEntry) => void
+  onSectionContext: (section: RosterSection) => void
 }) {
   const { p } = useTheme()
   const insets = useSafeAreaInsets()
-  const { team, call, online } = useTeam()
+  const { team, call, online, hello } = useTeam()
   const [name, setName] = useState(menu.kind === 'name' ? menu.section?.name ?? '' : '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -65,6 +66,7 @@ export function SidebarMenu({ menu, onChange, onCreate, onSettings }: {
     title = section.name
     body = <>
       {action(t('Rename section'), () => onChange({ kind: 'name', section }), allowed)}
+      {hello?.capabilities.includes('section-context') && action(t('Section description and memory'), () => onSectionContext(section))}
       {action(t('Delete section'), () => Alert.alert(t('Delete section'), section.name, [
         { text: t('Cancel'), style: 'cancel' },
         { text: t('Delete'), style: 'destructive', onPress: () => void write('section-delete', { id: section.id }) },

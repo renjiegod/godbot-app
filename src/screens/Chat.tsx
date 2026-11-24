@@ -12,6 +12,7 @@ import { useTeam } from '../team/context.tsx'
 import { agentNameOf, signInPlace } from '../team/local-sign-in.ts'
 import { partWork } from '../team/bot-sessions.ts'
 import { LocalSignIn } from './chat/local-sign-in.tsx'
+import { FailoverActivity } from './bot-failover.tsx'
 import { markSeen } from '../team/seen.ts'
 import { messageClock, t } from '../ui/i18n.ts'
 import { ErrorBoundary } from '../ui/error-boundary.tsx'
@@ -508,10 +509,12 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
   }, [inRoom, botsById, admin, p, layout, conversation, botMax, userMax, sessionId, openFile, saveFile, retry, openSteps, memberWork, openWork, workRows])
 
   const empty = page !== null && rows.length === 0
+  const failover = bot?.failoverHistory?.find(row => row.sessionId === sessionId)
   return (
     <PhotoViewerCtx.Provider value={setPhotos}>
     <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={KEYBOARD_GAP - insets.bottom} style={[styles.screen, { backgroundColor: p.main }]}>
       {header}
+      {failover && <FailoverActivity row={failover} navigation={navigation} />}
       {room !== undefined && (room as { goal?: Goal }).goal ? <GoalBar goal={(room as { goal?: Goal }).goal!} p={p} /> : null}
       <View style={styles.list} onLayout={event => setViewportWidth(event.nativeEvent.layout.width)}>
         {gone

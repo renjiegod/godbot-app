@@ -285,6 +285,56 @@ async function main() {
     }
   })
 
+  await page('section-failover', 'section-save · memory-add · update-bot', async (r) => {
+    const section = await channel('section-save', { name: 'Delivery ' + TAG, description: 'From Web ' + TAG })
+    const bot = await channel('create-bot', { name: 'Failover ' + TAG, sectionId: section.id })
+    const description = 'From Android ' + TAG
+    const memory = 'Android shared memory ' + TAG
+    const hostSection = async () => (await state()).sections.find(entry => entry.id === section.id)
+    const hostBot = async () => (await state()).bots.find(entry => entry.id === bot.id)
+
+    const openSection = async () => {
+      await openDrawer()
+      await tapOn('the section actions', section.name + ' actions')
+      await tapOn('the section editor', 'Section description and memory')
+    }
+
+    try {
+      await openSection()
+      await wait('the Web description displayed on Android', section.description)
+      await fill('section description', section.description, description, { clear: true })
+      await tapOn('Save description', 'Save description')
+      await until(hostSection, entry => entry.description === description, 'the Android description on Web')
+      await tapOn('Add a memory', 'Add')
+      await fill('memory text', /^Memory entry$/, memory)
+      await tapOn('Save memory', 'Save')
+      await until(() => channel('memory-view', { sectionId: section.id }), view => view.entries.some(entry => entry.text === memory), 'the Android memory in the host')
+      await channel('memory-edit', { sectionId: section.id, scope: 'section', text: memory, next: memory + ' edited' })
+
+      await relaunch()
+      await openSection()
+      await wait('the Web memory edit displayed on Android', memory + ' edited')
+      shot('section-context')
+
+      await relaunch()
+      await openBotDetails(bot.name)
+      await tapOn('Edit Bot', 'Edit Bot')
+      tap(await scrollTo(nodes => find(nodes, 'Configure failover'), 'Configure failover'))
+      tap(await scrollTo(nodes => find(nodes, 'Add backup Bot'), 'Add backup Bot'))
+      await tapOn('the backup Bot', main.name)
+      tap(await scrollTo(nodes => find(nodes, 'Save'), 'Save the failover policy'))
+      await until(hostBot, entry => entry.failover?.bots?.[0] === main.id, 'the Android failover policy on Web')
+      await channel('update-bot', { id: bot.id, failover: null })
+      await wait('failover disabled after the Web edit', 'Disabled')
+      shot('failover')
+      r.read = 'Web description, memory edit and failover policy read on Android'
+      r.write = 'Android description, memory and failover policy confirmed through Web'
+    } finally {
+      await channel('delete-bot', { id: bot.id })
+      await channel('section-delete', { id: section.id })
+    }
+  })
+
   await page('bot', 'create-bot · update-bot · delete-bot', async (r) => {
     await openBotDetails(main.name)
     await scrollTo(nodes => find(nodes, 'Working folder'), 'the working folder')
