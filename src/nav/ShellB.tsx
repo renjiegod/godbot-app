@@ -25,7 +25,8 @@ import { parallelSessions } from '../team/bot-sessions.ts'
 import { NeedsYou } from '../screens/NeedsYou.tsx'
 import { Settings } from '../screens/Settings.tsx'
 import { TeamList, type ChatTarget } from '../screens/TeamList.tsx'
-import { BotDetails, BotEdit, NewBot, NewGroup, GroupDetails, GroupSettings, Memory, Schedules, Folder, Usage, Computers, Secrets } from '../screens/manage.tsx'
+import { Automation } from '../screens/automation.tsx'
+import { BotDetails, BotEdit, NewBot, NewGroup, GroupDetails, GroupSettings, Memory, Folder, Usage, Computers, Secrets } from '../screens/manage.tsx'
 import { Providers, Connectors, Capabilities, TeamUsage, Location, Updates, About } from '../screens/settings-pages.tsx'
 import { LocalAgentUsage } from '../screens/local-agent-usage.tsx'
 import { Side } from '../screens/side.tsx'
@@ -145,7 +146,7 @@ function DrawerContent() {
           </View>
           <ChevronRightIcon size={14} />
         </Pressable>
-        <Pressable accessibilityRole="button" accessibilityLabel={t('Automation tasks')} onPress={() => openScreen('Schedules')}
+        <Pressable accessibilityRole="button" accessibilityLabel={t('Automation')} onPress={() => openScreen('Automation')}
           style={[styles.round, { borderColor: p.line, backgroundColor: p.card }]}>
           <ClockIcon size={18} />
         </Pressable>
@@ -416,7 +417,7 @@ function Inner({ initial }: { initial: ChatTarget | null }) {
       <Stack.Screen name="GroupDetails" component={GroupDetails} />
       <Stack.Screen name="GroupSettings" component={GroupSettings} />
       <Stack.Screen name="Memory" component={Memory} />
-      <Stack.Screen name="Schedules" component={Schedules} />
+      <Stack.Screen name="Automation" component={Automation} />
       <Stack.Screen name="Folder" component={Folder} />
       <Stack.Screen name="Usage" component={Usage} />
       <Stack.Screen name="BotBrowser">{({ route, navigation }: any) => <BotBrowser bot={route.params.bot} navigation={navigation} />}</Stack.Screen>

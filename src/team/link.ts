@@ -137,7 +137,7 @@ export function useTeamLink(computer: SavedComputer, identity: PhoneIdentity) {
   const call = useCallback(async (endpoint: string, payload: unknown = {}) => {
     const client = clientRef.current
     if (client === undefined) throw offline()
-    await ensureUnlock(endpoint)
+    await ensureUnlock(endpoint, payload)
     if (clientRef.current !== client) throw offline()
     try {
       if (endpoint === 'state' || endpoint === 'hello' || endpoint === 'notices') {

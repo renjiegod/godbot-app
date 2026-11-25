@@ -14,8 +14,10 @@ export const GATED = new Set([
   'local-agent-login-start',
 ])
 
-export async function ensureUnlock(endpoint: string): Promise<void> {
-  if (!GATED.has(endpoint)) return
+export async function ensureUnlock(endpoint: string, payload?: unknown): Promise<void> {
+  const createsWebhook = endpoint === 'automation-create' &&
+    (payload as { trigger?: { kind?: string } } | null)?.trigger?.kind === 'webhook'
+  if (!GATED.has(endpoint) && !createsWebhook) return
   const level = await LocalAuth.getEnrolledLevelAsync()
   if (level === LocalAuth.SecurityLevel.NONE) {
     throw Object.assign(new Error(t('Set a screen lock on this phone to do this')), { code: 'unlock/unavailable' })

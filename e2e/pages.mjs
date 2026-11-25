@@ -429,33 +429,29 @@ async function main() {
     r.write = `memory-add "${text}", memory-edit → "${edited}", memory-forget`
   })
 
-  await page('schedules', 'schedule-create · schedule-delete', async (r) => {
-    const title = `E2E task ${TAG}`
+  await page('schedules', 'Automation · conversation message create and delete', async (r) => {
+    const title = 'E2E task ' + TAG
     const tasks = () => channel('schedules')
     await openBotDetails(main.name)
-    const entry = await scrollTo(nodes => find(nodes, 'No scheduled tasks yet. Add one', /^Scheduled tasks/), 'the schedules entry')
-    tap(entry)
-    await wait('the schedules page', 'Create task')
-    r.read = `schedules (${(await tasks()).tasks.length} tasks)`
-    await fill('title', /^Morning briefing$/, title)
-    await fill('prompt', /^Sum up what changed/, 'Say hello to the team')
-    await hideKeyboard()
-    tap(await scrollTo(nodes => find(nodes, 'Create task'), 'Create task'))
+    tap(await scrollTo(nodes => find(nodes, 'View automations for this Bot'), 'the Bot automation entry'))
+    await tapOn('New automation', 'New automation')
+    await fill('title', 'Automation name', title)
+    await fill('prompt', 'Message or instructions', 'Say hello to the team')
+    tap(await scrollTo(nodes => find(nodes, 'Create automation'), 'Create automation'))
     const made = await until(tasks, v => v.tasks.some(task => task.title === title), 'the new task')
-    const task = made.tasks.find(entry2 => entry2.title === title)
+    const task = made.tasks.find(entry => entry.title === title)
     await wait('the task in the list', title)
     shot('schedules')
     await tapOn('back to Bot Details', 'Back')
     await scrollTo(nodes => find(nodes, title), 'the task in Bot Details')
     await tapOn('back to chat', 'Back')
     await openDrawer()
-    await tapOn('team Automation tasks', 'Automation tasks')
-    await wait('the team schedule delivery selector', 'Deliver to')
-    const del = await waitFor(nodes => { const row = find(nodes, title); return row ? findInRow(nodes, row, 'Delete task') : undefined }, 'the delete button')
-    tap(del)
+    await tapOn('team Automation', 'Automation')
+    await tapOn('the new task', title)
+    tap(await scrollTo(nodes => find(nodes, 'Delete'), 'the delete button'))
     await alertTap('Delete')
-    await until(tasks, v => !v.tasks.some(entry2 => entry2.id === task.id), 'the task deleted')
-    r.write = `schedule-create "${title}" (daily 09:00), schedule-delete`
+    await until(tasks, v => !v.tasks.some(entry => entry.id === task.id), 'the task deleted')
+    r.write = 'created and deleted a daily conversation automation'
   })
 
   await page('folder', 'folders · update-bot workDir', async (r) => {

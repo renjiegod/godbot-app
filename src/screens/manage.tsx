@@ -13,6 +13,7 @@ import { listComputers, removeComputer, type StoredComputer } from '../store.ts'
 import { ComputersCtx } from '../nav/computers.ts'
 import * as ImagePicker from 'expo-image-picker'
 import { DEMO, useTeam } from '../team/context.tsx'
+import { legacyAutomationView, type AutomationView } from '../team/automation.ts'
 import { memorySummaryText } from '../team/memory.ts'
 import { botPrivacyBlock, isLocalModel, modelRoute, sessionFigures, sessionUsage, type SessionStats } from '../team/bot-details.ts'
 import { botSessions, sessionLabel } from '../team/bot-sessions.ts'
@@ -20,7 +21,7 @@ import { SessionRow, useSessionsAvailable, useSessionSwitch } from './chat/sessi
 import { connectorRows } from '../team/connectors.ts'
 import { BotFailoverEditor, FailoverActivity } from './bot-failover.tsx'
 import { folderPlan, type FolderPlan, type FoldersView } from '../team/folders.ts'
-import { t, timeLabel, weekdayShort } from '../ui/i18n.ts'
+import { t } from '../ui/i18n.ts'
 import { CheckIcon, ChevronLeftIcon, ChevronRightIcon, GearIcon, PlusIcon } from '../ui/icons.tsx'
 import { Avatar, COLOR_PAINT, RoomAvatar } from '../ui/marks.tsx'
 import { inkColor, radius, shadow, type as typeScale, useTheme, type Palette } from '../ui/tokens.ts'
@@ -47,7 +48,7 @@ export const roomOf = (team: TeamState | null, id: string) => team?.rooms?.find(
 const mainsOf = (team: TeamState | null) => new Set(team?.mainBotIds ?? (team?.mainBotId ? [team.mainBotId] : []))
 const isMain = (team: TeamState | null, id: string) => mainsOf(team).has(id)
 
-function Screen({ title, children }: { title: string; children: React.ReactNode }) {
+export function Screen({ title, children }: { title: string; children: React.ReactNode }) {
   const { p } = useTheme()
   const insets = useSafeAreaInsets()
   const inSheet = useInSheet()
@@ -71,12 +72,12 @@ export function BackRow({ title, onBack, end }: { title: string; onBack: () => v
   )
 }
 
-function Section({ label, children }: { label: string; children: React.ReactNode }) {
+export function Section({ label, children }: { label?: string; children: React.ReactNode }) {
   const { p } = useTheme()
   const items = Children.toArray(children).filter(Boolean)
   return (
     <View style={{ marginTop: 18 }}>
-      <Text style={[typeScale.caption, { color: p.ink3, paddingHorizontal: 18, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.6, fontSize: 11 }]}>{label}</Text>
+      {label ? <Text style={[typeScale.caption, { color: p.ink3, paddingHorizontal: 18, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.6, fontSize: 11 }]}>{label}</Text> : null}
       <View style={[styles.card, { backgroundColor: p.card, borderColor: p.line }]}>
         {items.map((child, i) => (
           <Fragment key={i}>
@@ -89,7 +90,7 @@ function Section({ label, children }: { label: string; children: React.ReactNode
   )
 }
 
-function Row({ label, hint, value, onPress, disabled, end }: { label: string; hint?: string; value?: string; onPress?: () => void; disabled?: boolean; end?: React.ReactNode }) {
+export function Row({ label, hint, value, onPress, disabled, end }: { label: string; hint?: string; value?: string; onPress?: () => void; disabled?: boolean; end?: React.ReactNode }) {
   const { p } = useTheme()
   const body = (
     <View style={styles.row}>
@@ -257,7 +258,7 @@ export function BotDetails({ route, navigation }: any) {
           <DetailAbout key={bot.id} bot={bot} writable={writable} onSave={instructions => save({ instructions })} />
           {team?.memory === false ? null : <MemorySummary bot={bot} onOpen={() => navigation.navigate('Memory', { id: bot.id, name: bot.name, group: false })} />}
           <UsageSummary bot={bot} stats={stats} onOpen={() => navigation.navigate('Usage', { botId: bot.id, name: bot.name })} />
-          <ScheduleSummary bot={bot} onOpen={() => navigation.navigate('Schedules', { botId: bot.id, name: bot.name, sessionId: bot.sessionId })} />
+          <AutomationSummary bot={bot} onOpen={() => navigation.navigate('Automation', { botId: bot.id })} />
         </ScrollView>
       </KeyboardAvoidingView>
     </Screen>
@@ -537,33 +538,31 @@ function UsageSummary({ bot, stats, onOpen }: { bot: Bot; stats: SessionStats | 
   )
 }
 
-// schedules.js ScheduleSummary: the Bot's active tasks, or the way to add one.
-function ScheduleSummary({ bot, onOpen }: { bot: Bot; onOpen: () => void }) {
+function AutomationSummary({ bot, onOpen }: { bot: Bot; onOpen: () => void }) {
   const { p } = useTheme()
-  const { call, online } = useTeam()
+  const { call, online, hello } = useTeam()
   const focused = useIsFocused()
-  const [view, setView] = useState<{ available?: boolean; tasks?: { id: string; botId?: string; status?: string; title?: string }[] } | null>(null)
+  const full = hello?.capabilities.includes('unified-automation') === true
+  const [view, setView] = useState<AutomationView | null>(null)
   useEffect(() => {
     if (!focused || !online) return
     let live = true
-    call('schedules').then(value => { if (live) setView(value as typeof view) }).catch(() => {})
+    call(full ? 'automation-view' : 'schedules').then(value => {
+      if (live) setView(full ? value as AutomationView : legacyAutomationView(value as Parameters<typeof legacyAutomationView>[0]))
+    }).catch(() => {})
     return () => { live = false }
-  }, [call, focused, online, bot.sessionId])
-  const tasks = view?.available ? (view.tasks ?? []).filter(task => task.botId === bot.id && task.status === 'active') : []
-  return (
-    <>
-      <DetailTitle text={tasks.length === 0 ? t('Scheduled tasks') : t('Scheduled tasks · {count}', { count: tasks.length })} />
-      {tasks.length === 0
-        ? <Pressable accessibilityRole="button" onPress={onOpen} style={{ minHeight: 32, justifyContent: 'center' }}>
-            <Text style={[typeScale.small, { color: p.ink3 }]}>{view?.available === false ? t('Switch on Automation tasks on the Plugins page in Settings.') : t('No scheduled tasks yet. Add one')}</Text>
-          </Pressable>
-        : tasks.slice(0, 3).map(task => (
-            <Pressable key={task.id} accessibilityRole="button" onPress={onOpen} style={{ minHeight: 36, justifyContent: 'center' }}>
-              <Text style={[typeScale.small, { color: p.ink }]} numberOfLines={1}>{task.title}</Text>
-            </Pressable>
-          ))}
-    </>
-  )
+  }, [call, focused, online, bot.sessionId, full])
+  const tasks = (view?.items ?? []).filter(item => item.target.id === bot.id && item.status !== 'finished')
+  return <>
+    <DetailTitle text={t('Automation')} />
+    {tasks.slice(0, 3).map(task => <Pressable key={task.source + '/' + task.id} accessibilityRole="button"
+      onPress={onOpen} style={{ minHeight: 36, justifyContent: 'center' }}>
+      <Text style={[typeScale.small, { color: p.ink }]} numberOfLines={1}>{task.title}</Text>
+    </Pressable>)}
+    <Pressable accessibilityRole="button" onPress={onOpen} style={{ minHeight: 32, justifyContent: 'center' }}>
+      <Text style={[typeScale.small, { color: p.ink2 }]}>{t('View automations for this Bot')}</Text>
+    </Pressable>
+  </>
 }
 
 // The desktop's BotCapabilitiesCard: packs first, then by name; a switch per
@@ -657,7 +656,7 @@ export function BotEdit({ route, navigation }: any) {
           <Row label={t('Section description and memory')} onPress={() => navigation.navigate('Memory', { id: section.id, name: section.name, section: true })} />
         </Section>}
         <Section label={t('Scheduled tasks')}>
-          <Row label={t('Schedules')} onPress={() => navigation.navigate('Schedules', { botId: bot.id, name: bot.name, sessionId: bot.sessionId })} />
+          <Row label={t('Automation')} onPress={() => navigation.navigate('Automation', { botId: bot.id })} />
         </Section>
         <MainBotSettings bot={bot} team={team} writable={writable} run={run} />
         {primary ? null : <Section label={t('Sidebar')}>
@@ -1176,180 +1175,6 @@ function MemoryView({ route, navigation }: any) {
   )
 }
 
-// ------------------------------------------------------------ Schedules
-
-const KINDS: [string, string][] = [['at', 'Once'], ['daily', 'Every day'], ['weekly', 'Every week'], ['every', 'Repeat']]
-const UNITS: [string, number, string][] = [['minutes', 1, 'minutes'], ['hours', 60, 'hours'], ['days', 1440, 'days']]
-
-const todayString = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
-
-interface ScheduledTask {
-  id: string
-  sessionId: string
-  botId?: string
-  roomId?: string
-  title: string
-  kind: string
-  status: string
-  state?: string
-  time?: string
-  everySeconds?: number
-  minutes?: number
-  weekdays?: number[]
-  expression?: string
-  scheduledAt?: number | string
-}
-
-const whenText = (task: ScheduledTask) => {
-  switch (task.kind) {
-    case 'at': return t('Once, {time}', { time: timeLabel(typeof task.scheduledAt === 'number' ? task.scheduledAt : Date.parse(task.scheduledAt ?? '')) })
-    case 'every': { const s = task.everySeconds ?? (task.minutes ?? 0) * 60; if (s % 86400 === 0) return s === 86400 ? t('Every day') : t('Every {count} days', { count: s / 86400 }); if (s % 3600 === 0) return s === 3600 ? t('Every hour') : t('Every {count} hours', { count: s / 3600 }); return t('Every {count} minutes', { count: Math.round(s / 60) }) }
-    case 'daily': return t('Every day at {time}', { time: task.time ?? '' })
-    case 'weekly': {
-      const d = (task.weekdays ?? []).join()
-      if (d === '1,2,3,4,5') return t('Every weekday at {time}', { time: task.time ?? '' })
-      if (d === '6,7') return t('Every weekend at {time}', { time: task.time ?? '' })
-      if (d === '1,2,3,4,5,6,7') return t('Every day at {time}', { time: task.time ?? '' })
-      const labels = (task.weekdays ?? []).map(day => {
-        const short = weekdayShort(day)
-        return /^[\u4e00-\u9fff]$/.test(short) ? `周${short}` : short
-      })
-      return t('Every {days} at {time}', { days: labels.join(labels[0]?.startsWith('周') ? '、' : ', '), time: task.time ?? '' })
-    }
-    case 'cron': return t('On the schedule {expression}', { expression: task.expression ?? '' })
-    default: return ''
-  }
-}
-
-export function Schedules({ route, navigation }: any) {
-  const { p } = useTheme()
-  const insets = useSafeAreaInsets()
-  const { call, team, online } = useTeam()
-  const { run, error } = useWrite(navigation)
-  const botId = String(route.params?.botId ?? '')
-  const roomId = String(route.params?.roomId ?? '')
-  const scoped = botId !== '' || roomId !== ''
-  const [view, setView] = useState<{ available?: boolean; tasks?: ScheduledTask[] } | null>(null)
-  const [readError, setReadError] = useState<string | null>(null)
-  const [target, setTarget] = useState('')
-  const [choosing, setChoosing] = useState(false)
-  const [title, setTitle] = useState('')
-  const [prompt, setPrompt] = useState('')
-  const [kind, setKind] = useState('daily')
-  const [time, setTime] = useState('09:00')
-  const [atDate, setAtDate] = useState(todayString)
-  const [atTime, setAtTime] = useState('09:00')
-  const [weekdays, setWeekdays] = useState<number[]>([1, 2, 3, 4, 5])
-  const [count, setCount] = useState('1')
-  const [unit, setUnit] = useState('hours')
-  const [adding, setAdding] = useState(false)
-  const focused = useIsFocused()
-  useEffect(() => {
-    if (!focused || !online) return
-    let live = true
-    void call('schedules').then(value => {
-      if (!live) return
-      setView(value as typeof view)
-      setReadError(null)
-    }, failure => { if (live) setReadError((failure as Error)?.message ?? String(failure)) })
-    return () => { live = false }
-  }, [call, focused, online, botId, roomId])
-  const targets = [...(team?.bots ?? []), ...(team?.rooms ?? [])]
-  const selected = targets.find(entry => entry.id === (botId || roomId || target || team?.mainBotId)) ?? (scoped ? undefined : targets[0])
-  const writable = online && !team?.readOnly && view?.available !== false
-  const tasks = (view?.tasks ?? []).filter(task => !scoped || (botId ? task.botId === botId && !task.roomId : task.roomId === roomId && !task.botId))
-  const applySchedules = (value: unknown) => {
-    const next = value as typeof view
-    if (Array.isArray(next?.tasks)) setView(next)
-  }
-  const when = () => {
-    if (kind === 'at') { const at = new Date(`${atDate}T${atTime}`); return Number.isNaN(at.getTime()) ? null : { kind, at: at.toISOString() } }
-    if (kind === 'every') { const minutes = Math.round(Number(count) * (UNITS.find(([id]) => id === unit)?.[1] ?? 60)); return minutes > 0 ? { kind, minutes } : null }
-    return { kind, time, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, ...(kind === 'weekly' ? { weekdays } : {}) }
-  }
-  const create = async () => {
-    const timing = when()
-    if (!writable || adding || !selected || !title.trim() || !prompt.trim() || timing === null) return
-    setAdding(true)
-    await run('schedule-create', { target: selected.id, title: title.trim(), prompt: prompt.trim(), when: timing }, value => {
-      setTitle('')
-      setPrompt('')
-      applySchedules(value)
-    })
-    setAdding(false)
-  }
-  const canCreate = writable && selected !== undefined && title.trim() !== '' && prompt.trim() !== '' && !adding
-  return (
-    <Screen title={String(route.params?.name ?? '')}>
-      <BackRow title={t(scoped ? 'Schedules' : 'Automation tasks')} onBack={() => navigation.goBack()} />
-      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
-        {error ?? readError ? <Text accessibilityRole="alert" style={[typeScale.caption, { color: p.danger, marginHorizontal: 18 }]}>{error ?? readError}</Text> : null}
-        <Section label={t('Schedules')}>
-          {tasks.map(task => (
-            <View key={task.id} style={styles.row}>
-              <View style={{ flex: 1 }}>
-                <Text style={[typeScale.settingsRow, { color: p.ink }]}>{task.title}</Text>
-                <Text style={[typeScale.small, { color: p.ink3, marginTop: 2 }]}>
-                  {[scoped ? undefined : targets.find(entry => entry.id === (task.roomId ?? task.botId))?.name, whenText(task)].filter(Boolean).join(' · ')}
-                </Text>
-              </View>
-              {writable && task.sessionId ? <Pressable accessibilityRole="button" accessibilityLabel={t('Delete task')}
-                onPress={() => confirmDanger(t('Delete task'), t('Delete'), () => void run('schedule-delete', { sessionId: task.sessionId, id: task.id }, applySchedules))} hitSlop={8}>
-                <Text style={{ color: p.ink3, fontSize: 17 }}>×</Text>
-              </Pressable> : null}
-            </View>
-          ))}
-          {tasks.length === 0 ? <Row label={t(view?.available === false ? 'Switch on Automation tasks on the Plugins page in Settings.' : view === null && readError === null ? 'Loading…' : 'Nothing saved yet')} /> : null}
-        </Section>
-        {writable ? <><Section label={t('New task')}>
-          {scoped ? null : <Row label={t('Deliver to')} value={selected?.name} onPress={() => setChoosing(!choosing)} />}
-          {choosing ? targets.map(entry => <Row key={entry.id} label={entry.name} onPress={() => { setTarget(entry.id); setChoosing(false) }} />) : null}
-          <View style={styles.row}><TextInput style={[typeScale.settingsRow, { color: p.ink, flex: 1 }]} value={title} onChangeText={setTitle} placeholder={t('Morning briefing')} placeholderTextColor={p.ink3} /></View>
-          <View style={styles.row}><TextInput style={[typeScale.settingsRow, { color: p.ink, flex: 1, minHeight: 70, textAlignVertical: 'top' }]} value={prompt} onChangeText={setPrompt} placeholder={t('Sum up what changed since yesterday and what needs me today.')} placeholderTextColor={p.ink3} multiline /></View>
-          <View style={{ paddingHorizontal: 16, paddingVertical: 10 }}>
-            <Text style={[typeScale.small, { color: p.ink3, marginBottom: 6 }]}>{t('When')}</Text>
-            <Segmented value={kind} onPick={id => setKind(id)} options={KINDS.map(([id, label]) => ({ id, label: t(label) }))} />
-          </View>
-          {kind === 'at' ? (
-            <View style={styles.row}>
-              <TextInput style={[typeScale.settingsRow, { color: p.ink, flex: 1 }]} value={atDate} onChangeText={setAtDate} placeholder="YYYY-MM-DD" placeholderTextColor={p.ink3} autoCapitalize="none" />
-              <TextInput style={[typeScale.settingsRow, { color: p.ink, width: 70 }]} value={atTime} onChangeText={setAtTime} placeholder="09:00" placeholderTextColor={p.ink3} autoCapitalize="none" />
-            </View>
-          ) : null}
-          {kind === 'weekly' ? (
-            <View style={[styles.row, { flexWrap: 'wrap', gap: 6 }]}>
-              {[1, 2, 3, 4, 5, 6, 7].map(day => (
-                <Pressable key={day} accessibilityRole="button" accessibilityState={{ selected: weekdays.includes(day) }} onPress={() => setWeekdays(days => days.includes(day) ? days.filter(d => d !== day) : [...days, day].sort())}
-                  style={[styles.dayBtn, { borderColor: weekdays.includes(day) ? p.accent : p.line, backgroundColor: weekdays.includes(day) ? p.accent : 'transparent' }]}>
-                  <Text style={[typeScale.caption, { color: weekdays.includes(day) ? p.accentInk : p.ink2 }]}>{weekdayShort(day)}</Text>
-                </Pressable>
-              ))}
-            </View>
-          ) : null}
-          {kind === 'daily' || kind === 'weekly' ? (
-            <View style={styles.row}><Text style={[typeScale.settingsRow, { color: p.ink3, flex: 1 }]}>{t('Time')}</Text>
-              <TextInput style={[typeScale.settingsRow, { color: p.ink, minWidth: 70, textAlign: 'right' }]} value={time} onChangeText={setTime} placeholder="09:00" placeholderTextColor={p.ink3} autoCapitalize="none" /></View>
-          ) : null}
-          {kind === 'every' ? (
-            <View style={{ paddingHorizontal: 16, paddingVertical: 10, gap: 8 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Text style={[typeScale.settingsRow, { color: p.ink3 }]}>{t('Every')}</Text>
-                <TextInput style={[typeScale.settingsRow, { color: p.ink, minWidth: 72, borderWidth: 1, borderColor: p.line, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, textAlign: 'center' }]} value={count} onChangeText={setCount} placeholder="1" placeholderTextColor={p.ink3} keyboardType="number-pad" />
-              </View>
-              <Segmented value={unit} onPick={setUnit} options={UNITS.map(([id, , label]) => ({ id, label: t(label) }))} />
-            </View>
-          ) : null}
-        </Section>
-        <View style={{ paddingHorizontal: 18, marginTop: 14 }}>
-          <Pressable accessibilityRole="button" disabled={!canCreate} onPress={() => void create()} style={({ pressed }) => [styles.cta, { backgroundColor: p.accent, opacity: !canCreate ? 0.5 : pressed ? 0.85 : 1 }]}>
-            <Text style={[typeScale.settingsRow, { color: p.accentInk, fontWeight: '600' }]}>{t('Create task')}</Text>
-          </Pressable>
-        </View></> : null}
-      </ScrollView>
-    </Screen>
-  )
-}
-
 // ------------------------------------------------------------ Folder browser
 
 export function Folder({ route, navigation }: any) {
@@ -1586,7 +1411,6 @@ const styles = StyleSheet.create({
   sheet: { maxHeight: '72%', borderRadius: radius.card, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden', ...shadow(2) },
   menuRow: { paddingHorizontal: 18, paddingVertical: 14 },
   pickRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  dayBtn: { minWidth: 36, height: 36, paddingHorizontal: 8, borderRadius: 18, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   tick: { position: 'absolute', top: 3, right: 3, width: 16, height: 16, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
 })
 
