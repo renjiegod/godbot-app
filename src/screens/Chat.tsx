@@ -83,7 +83,7 @@ function keepScrollOffset(key: string, offset: number): void {
 // for while the team state is still on its way, and the chat takes that answer.
 const reads = new Map<string, Promise<ChatPage>>()
 const readChat = (call: (endpoint: string, payload?: unknown) => Promise<unknown>, room: boolean, id: string) =>
-  (room ? call('room-chat', { roomId: id, steps: true }) : call('chat', { botId: id, steps: true, inlineTools: true })) as Promise<ChatPage>
+  (room ? call('room-chat', { roomId: id, steps: true }) : call('chat', { botId: id, steps: true, inlineTools: true, turnStatuses: true })) as Promise<ChatPage>
 export function prefetchChat(call: (endpoint: string, payload?: unknown) => Promise<unknown>, computerId: string, target: { kind: 'bot' | 'room'; id: string }) {
   const key = `${computerId}:${target.kind}:${target.id}`
   if (pages.has(key) || reads.has(key)) return
@@ -263,7 +263,7 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
     try {
       const next = (room !== undefined
         ? await call('room-chat', { roomId: room.id, cursor, steps: true })
-        : await call('chat', { botId: id, cursor, steps: true, inlineTools: true })) as ChatPage
+        : await call('chat', { botId: id, cursor, steps: true, inlineTools: true, turnStatuses: true })) as ChatPage
       if (generation.current !== gen) return
       if (activePart !== undefined && next.sessionId !== undefined && next.sessionId !== activePart) {
         refreshTeam?.()

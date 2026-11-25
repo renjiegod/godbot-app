@@ -26,10 +26,12 @@ export type { SettledQuestionData }
 
 export interface ChatItem {
   id?: string
-  kind: 'bot' | 'user' | 'event' | 'answer' | 'view' | 'divider' | 'steps' | 'tool' | 'closed' | 'post' | 'relay'
+  kind: 'bot' | 'user' | 'event' | 'answer' | 'view' | 'divider' | 'steps' | 'tool' | 'closed' | 'post' | 'relay' | 'turn-status'
   timelineId?: string
   toolId?: string
   status?: string
+  cause?: string
+  exitCode?: number
   text?: string
   time?: number
   seq?: number
@@ -134,6 +136,20 @@ export const Item = memo(function Item({ item, p, layout, maxWidth, inRoom, sess
   const longPress = () => { void Haptics.selectionAsync(); onLongPress?.(source) }
   if (item.kind === 'tool') return <ToolCard item={item} p={p} conversation={conversation} open={open === true} onToggle={onToggle} />
   if (item.kind === 'steps') return <Steps item={item} p={p} conversation={conversation} open={open === true} onToggle={onToggle ?? (() => {})} />
+  if (item.kind === 'turn-status') {
+    const label = t(item.status === 'stopped' ? 'Turn stopped' : item.status === 'failed' ? 'Turn failed' : 'Turn interrupted')
+    const color = item.status === 'stopped' ? p.ink2 : p.danger
+    const detail = item.cause === 'steered' ? t('Continued with the new message')
+      : item.cause === 'output-limit' ? t('Reached the output limit')
+        : item.exitCode === undefined ? '' : t('Exit code {code}', { code: item.exitCode })
+    return (
+      <View accessibilityRole="text" accessibilityLiveRegion="polite" style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginVertical: 5 }}>
+        <Text style={[type.caption, { color, borderWidth: StyleSheet.hairlineWidth, borderColor: color, borderRadius: 6,
+          paddingHorizontal: 6, paddingVertical: 2, fontWeight: '600' }]}>{label}</Text>
+        {detail ? <Text style={[type.caption, { color: p.ink2 }]}>{detail}</Text> : null}
+      </View>
+    )
+  }
   if (item.kind === 'divider') {
     const label = typeof item.time === 'number' ? clockLabel(item.time) : ''
     return (
