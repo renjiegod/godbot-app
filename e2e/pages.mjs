@@ -274,10 +274,20 @@ async function main() {
       await until(activeBot, value => value?.sessionId === first, 'the session opened on Android on Web')
       r.write += ', Android session changes confirmed through Web'
       await wait('the original transcript on Android', firstMessage)
+      await tapOn('the chat session list', 'Sessions')
+      const waitSessionOrder = (top, other, what) => waitFor(nodes => {
+        const before = nodes.find(node => node.id.endsWith('session-' + top))
+        const after = nodes.find(node => node.id.endsWith('session-' + other))
+        return before && after && before.bounds.y1 < after.bounds.y1 ? before : undefined
+      }, what)
+      await waitSessionOrder(next.sessionId, first, 'opening an older session keeps the latest activity first')
+      await seed(first, `Follow-up ${TAG}`)
+      await waitSessionOrder(first, next.sessionId, 'new activity moves the older session to the top of the open list')
+      await tapOn('close the chat session list', 'Close')
       await channel('bot-open-part', { botId: bot.id, sessionId: next.sessionId })
       await wait('the session selected on Web, reflected on Android', secondMessage)
       if (find(ui(), firstMessage)) throw new Error('The first session transcript is still visible after the Web switch')
-      r.read += ', Web session switch reflected on Android'
+      r.read += ', Web session switch and recent activity order reflected on Android'
     } finally {
       await channel('delete-bot', { id: bot.id })
       await channel('section-delete', { id: section.id })

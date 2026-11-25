@@ -33,6 +33,14 @@ test('every session of the chat is listed newest first, background chains includ
   assert.equal(entries.find(entry => entry.id === 'p0')?.number, 2)
 })
 
+test('running rows come first, with the host timestamp ordering each set of rows', () => {
+  const state = { ...team, partsRunning: { ...team.partsRunning, p3: true }, partActivity: { p1: 200, p2: 100, p3: 100, p4: 100, p6: 80 } }
+  assert.deepEqual(botSessions(bot, state).map(({ id, number }) => [id, number]), [
+    ['p4', 5], ['p6', 7], ['p1', 1], ['p3', 4], ['p2', 3], ['p0', 2],
+  ])
+  assert.deepEqual(botSessions(bot, { ...state, partsRunning: {} }).map(row => row.id), ['p1', 'p4', 'p3', 'p2', 'p6', 'p0'])
+})
+
 test('a session is named by its first prompt, else New session or its number', () => {
   const [p6, p4, p3, p2] = botSessions(bot, team)
   assert.equal(sessionLabel(p4, bot, team), 'continue working on issues/2020')
@@ -41,8 +49,8 @@ test('a session is named by its first prompt, else New session or its number', (
   assert.equal(sessionLabel(p6, bot, team), 'Session 7')
   const fresh = { ...bot, sessionId: 'p7' }
   const quiet = { ...team, newSessions: { p1: 'empty' as const } }
-  const [current] = botSessions(fresh, quiet)
-  assert.equal(current.id, 'p7')
+  const current = botSessions(fresh, quiet).find(entry => entry.current)
+  assert.equal(current?.id, 'p7')
   assert.equal(sessionLabel(current, fresh, quiet), 'New session')
 })
 
@@ -59,8 +67,8 @@ test('a running background part stays listed even when nobody talked in it yet',
     newSessions: { [godbot.id]: 'empty' },
   }
   const rows = botSessions(godbot, state)
-  assert.deepEqual(rows.map(row => [row.id, row.number, row.current, row.running]), [['part-4', 4, true, false], ['part-3', 3, false, true], ['bot-1', 1, false, false]])
-  assert.deepEqual(rows.map(row => sessionLabel(row, godbot, state)), ['New session', 'Session 3', 'Session 1'])
+  assert.deepEqual(rows.map(row => [row.id, row.number, row.current, row.running]), [['part-3', 3, false, true], ['part-4', 4, true, false], ['bot-1', 1, false, false]])
+  assert.deepEqual(rows.map(row => sessionLabel(row, godbot, state)), ['Session 3', 'New session', 'Session 1'])
 })
 
 test('an older host without first prompts numbers every session', () => {
@@ -113,7 +121,8 @@ test('the session list and the computer\'s refusals read in Chinese', () => {
     assert.equal(sessionMeta(p6).text, '运行中')
     assert.equal(sessionMeta(p3).text, '等你回答')
     assert.equal(sessionMeta({ ...p4, running: false }).text, '当前')
-    const [current] = botSessions({ ...bot, sessionId: 'p7' }, team)
+    const current = botSessions({ ...bot, sessionId: 'p7' }, team).find(entry => entry.current)
+    assert.ok(current)
     assert.equal(sessionLabel(current, bot, { ...team, newSessions: { p1: 'empty' } }), '新会话')
     assert.equal(t('Sessions of {name}', { name: 'Codex' }), 'Codex 的会话')
     assert.equal(t('{count} running in the background', { count: 2 }), '2 个会话在后台运行')

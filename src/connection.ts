@@ -146,6 +146,8 @@ export interface TeamState {
   // Each part of a Bot's own chat by the first thing the user asked in it (part-titles.js).
   // Sent by a host whose Bot chats go on in the background while another part is open.
   partTitles?: Record<string, string>
+  // DSH's session-list timestamp by part. It can change without a team revision.
+  partActivity?: Record<string, number>
   sections?: { id: string; name: string; collapsed?: boolean; color?: string; description?: string }[]
   memory?: boolean
   questions?: Record<string, Question>

@@ -19,10 +19,11 @@ export interface BotSession {
 }
 
 export const currentPart = (bot: Bot) => bot.sessionId ?? bot.id
+const runningRank = (entry: BotSession) => Number(entry.running && !entry.waiting)
 
 // Every session of a Bot's own chat: the current one, each one going on in the
-// background, and the earlier ones of every chain, newest first. A session nobody talked
-// in holds nothing to go back to and is left out, unless it is current or still running.
+// background, and the earlier ones of every chain. Running rows come first, then
+// newest activity within each set. Empty sessions are hidden unless current or running.
 export function botSessions(bot: Bot, team: TeamState | null): BotSession[] {
   const current = currentPart(bot)
   const empty = new Set(team?.emptyParts?.[bot.id] ?? [])
@@ -35,6 +36,7 @@ export function botSessions(bot: Bot, team: TeamState | null): BotSession[] {
   // to, the current one last.
   const order = unique([...(bot.partOrder ?? []), ...(bot.parts ?? []), ...open.flatMap(part => [...(part.parts ?? []), part.sessionId]), current])
   const numbers = new Map(order.map((id, index) => [id, index + 1]))
+  const activity = team?.partActivity
   return ids
     .filter(id => id === current || running[id] === true || !empty.has(id))
     .map(id => ({
@@ -46,7 +48,7 @@ export function botSessions(bot: Bot, team: TeamState | null): BotSession[] {
       waiting: team?.questions?.[id] !== undefined,
       title: team?.partTitles?.[id] ?? '',
     }))
-    .sort((a, b) => b.number - a.number)
+    .sort((a, b) => runningRank(b) - runningRank(a) || (activity?.[b.id] ?? 0) - (activity?.[a.id] ?? 0) || b.number - a.number)
 }
 
 const unique = (ids: (string | undefined)[]): string[] =>
