@@ -1,6 +1,6 @@
 {
   "name": "godbot-app",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "main": "index.ts",
   "dependencies": {
     "@lukeburns/clatterjs": "1.0.0",
