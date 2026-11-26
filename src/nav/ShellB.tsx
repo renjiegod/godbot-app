@@ -414,6 +414,7 @@ function Inner({ initial }: { initial: ChatTarget | null }) {
       <Stack.Screen name="Chat" component={ChatScreenB} initialParams={initial ?? undefined} />
       <Stack.Screen name="BotDetails" component={BotDetails} />
       <Stack.Screen name="BotEdit" component={BotEdit} />
+      <Stack.Screen name="SharedCapabilities" component={Capabilities} />
       <Stack.Screen name="GroupDetails" component={GroupDetails} />
       <Stack.Screen name="GroupSettings" component={GroupSettings} />
       <Stack.Screen name="Memory" component={Memory} />

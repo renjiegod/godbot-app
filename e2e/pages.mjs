@@ -143,15 +143,15 @@ async function openDrawer() {
 
 async function openChatOf(name) {
   await openDrawer()
-  // The chat's own title stays in the hierarchy behind the drawer.
-  const row = await waitFor(nodes => lastWhere(nodes, node => (node.text === name || node.desc === name || node.desc === `${name}, Main Bot`) && node.bounds.x1 < 700 && node.bounds.y1 > 230), `${name} in the team list`)
+  // The background chat also contains the Bot's name. Pick the drawer's button.
+  const row = await waitFor(nodes => lastWhere(nodes, node => node.clickable && (node.desc === name || node.desc === `${name}, Main Bot`)), `${name} in the team list`)
   tap(row)
-  await sleep(1_000)
+  await waitFor(nodes => !find(nodes, 'Close team list'), 'the team list to close')
 }
 
 async function openBotDetails(name) {
   await openChatOf(name)
-  const pill = await waitFor(nodes => nodes.find(node => node.text === name && node.bounds.y2 < 320), `${name}'s chat header`)
+  const pill = await waitFor(nodes => nodes.find(node => node.clickable && node.desc === name), `${name}'s chat header`)
   tap(pill)
   await wait(`${name}'s details`, 'Edit Bot')
   await sleep(500)
@@ -580,11 +580,17 @@ async function main() {
     r.write = `connector-connect ${pick.id} (no sign-in; state → ${after.state}), connector-disconnect`
   })
 
-  await page('capabilities', 'capability-save · capability-delete', async (r) => {
+  await page('capabilities', 'capability-save · bot-capability · capability-delete', async (r) => {
     const name = `e2e-skill-${TAG}`
-    await openSettingsPage('Capabilities')
+    const initialCount = (await state()).capabilities.length
+    await openBotDetails(main.name)
+    await tapOn('the Bot settings button', 'Edit Bot')
+    const library = () => scrollTo(nodes => find(nodes, /Shared capabilities/), 'the shared capabilities row in Bot settings')
+    const emptyEntry = await library()
+    if (initialCount === 0) await wait('the empty state help', /Add a skill or MCP server/)
+    tap(emptyEntry)
     await wait('the capabilities page', 'Add capability')
-    r.read = `capabilities (${(await state()).capabilities.length} saved)`
+    r.read = `capabilities from Bot settings (${initialCount} saved)`
     await tapOn('Add capability', 'Add capability')
     await fill('name', /^Name$/, name)
     await tapOn('Skill', 'Skill')
@@ -594,13 +600,22 @@ async function main() {
     tap(save)
     await unlockIfAsked()
     await until(state, team => team.capabilities.some(item => item.name === name), `the capability ${name}`)
+    await tapOn('back to the same Bot settings', 'Back')
+    const capabilitySwitch = nodes => nodes.find(node => node.cls.endsWith('Switch') && node.desc === name)
+    tap(await scrollTo(capabilitySwitch, `the ${name} switch`))
+    await unlockIfAsked()
+    await until(state, team => team.bots.some(bot => bot.id === main.id && bot.capabilities?.includes(name)) &&
+      team.bots.every(bot => bot.id === main.id || !bot.capabilities?.includes(name)), 'the skill enabled only for the selected Bot')
+    await channel('bot-capability', { botId: main.id, name, attached: false })
+    await waitFor(nodes => capabilitySwitch(nodes)?.checked === false, 'the Web capability change on the phone')
+    tap(await library())
     await tapOn('the capability', name)
     shot('capabilities')
     await tapOn('Delete', 'Delete')
     await alertTap('Delete')
     await unlockIfAsked()
     await until(state, team => !team.capabilities.some(item => item.name === name), 'the capability deleted')
-    r.write = `capability-save skill ${name}, capability-delete`
+    r.write = `capability-save skill ${name}, Android attach to ${main.name}, Web detach reflected on Android, capability-delete`
   })
 
   await page('usage', 'usage', async (r) => {

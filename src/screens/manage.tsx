@@ -25,7 +25,7 @@ import { t } from '../ui/i18n.ts'
 import { CheckIcon, ChevronLeftIcon, ChevronRightIcon, GearIcon, PlusIcon } from '../ui/icons.tsx'
 import { Avatar, COLOR_PAINT, RoomAvatar } from '../ui/marks.tsx'
 import { inkColor, radius, shadow, type as typeScale, useTheme, type Palette } from '../ui/tokens.ts'
-import type { Bot, Room, TeamState } from '../connection.ts'
+import type { Bot, CapabilityStatus, Room, TeamState } from '../connection.ts'
 import { capabilityStatusText } from '../team/capabilities.ts'
 import { modelOf, ModelMenu, ModelPicker } from './model-menu.tsx'
 import { MemberWorkSheet } from './chat/member-work.tsx'
@@ -145,7 +145,7 @@ function SwitchRow({ label, hint, on, disabled, onChange }: { label: string; hin
         <Text style={[typeScale.settingsRow, { color: p.ink }]}>{label}</Text>
         {hint ? <Text style={[typeScale.small, { color: p.ink3, marginTop: 2 }]}>{hint}</Text> : null}
       </View>
-      <Pressable accessibilityRole="switch" accessibilityState={{ checked: on, disabled }} disabled={disabled} onPress={() => onChange(!on)}
+      <Pressable accessibilityRole="switch" accessibilityLabel={label} accessibilityState={{ checked: on, disabled }} disabled={disabled} onPress={() => onChange(!on)}
         style={[styles.switch, { backgroundColor: on ? p.accent : p.line }]}>
         <View style={[styles.knob, { backgroundColor: p.accentInk, alignSelf: on ? 'flex-end' : 'flex-start' }]} />
       </Pressable>
@@ -567,16 +567,26 @@ function AutomationSummary({ bot, onOpen }: { bot: Bot; onOpen: () => void }) {
 
 // The desktop's BotCapabilitiesCard: packs first, then by name; a switch per
 // library item, with its status for this Bot while attached.
-function BotCapabilities({ bot, team, run, writable = true }: { bot: Bot; team: TeamState | null; run: ManageWrite; writable?: boolean }) {
-  const library = (team as { capabilities?: { name: string; kind?: string }[] } | null)?.capabilities ?? []
-  if (library.length === 0) return null
+function BotCapabilities({ bot, team, run, writable, openLibrary }: {
+  bot: Bot; team: TeamState | null; run: ManageWrite; writable: boolean; openLibrary: () => void
+}) {
+  const route = modelRoute(bot.appliedModel ?? bot.model ?? bot.engine)
+  if (isLocalModel(route) || route.startsWith('ag-ui-')) {
+    return (
+      <Section label={t('Capabilities')}>
+        <Row label={t('Managed by the agent')} hint={t('Configure skills and MCP servers in the agent environment for this Bot.')} />
+      </Section>
+    )
+  }
+  const library = team?.capabilities ?? []
   const items = [...library].sort((a, b) => Number(b.kind === 'pack') - Number(a.kind === 'pack') || a.name.localeCompare(b.name))
   const attached = new Set(bot.capabilities ?? [])
-  const statuses = (team as { capabilityStatuses?: Record<string, Record<string, { state?: string; error?: string }>> } | null)?.capabilityStatuses?.[bot.id] ?? {}
+  const statuses = team?.capabilityStatuses?.[bot.id] as Record<string, CapabilityStatus> | undefined
   return (
     <Section label={t('Capabilities')}>
+      <Row label={t('Shared capabilities')} hint={items.length === 0 ? t('Add a skill or MCP server, then enable it for this Bot.') : undefined} onPress={openLibrary} />
       {items.map(item => (
-        <SwitchRow key={item.name} label={item.name} hint={attached.has(item.name) ? capabilityStatusText(statuses[item.name]) : undefined}
+        <SwitchRow key={item.name} label={item.name} hint={attached.has(item.name) ? capabilityStatusText(statuses?.[item.name]) : undefined}
           on={attached.has(item.name)} disabled={!writable} onChange={next => void run('bot-capability', { botId: bot.id, name: item.name, attached: next })} />
       ))}
     </Section>
@@ -641,6 +651,7 @@ export function BotEdit({ route, navigation }: any) {
         <Section label={t('Working folder')}>
           <View style={{ padding: 12 }}><BotFolder bot={bot} navigation={navigation} writable={writable} /></View>
         </Section>
+        <BotCapabilities bot={bot} team={team} run={run} writable={writable} openLibrary={() => navigation.navigate('SharedCapabilities')} />
         <Section label={t('Privacy')}>
           <SwitchRow label={t('Private')} hint={t(privacyBlock ?? 'Other Bots cannot read its folder, memory or chats, and you approve what it shares with them.')}
             on={bot.private === true} disabled={!writable || privacyBlock !== undefined} onChange={next => void save({ private: next })} />
@@ -648,7 +659,6 @@ export function BotEdit({ route, navigation }: any) {
         <Section label={t('Instructions')}>
           <Field label={t('What this Bot does')} value={bot.instructions} multiline editable={writable} placeholder={t('What this Bot is responsible for…')} onSave={instructions => void save({ instructions })} />
         </Section>
-        <BotCapabilities bot={bot} team={team} run={run} writable={writable} />
         {team?.memory === false ? null : <Section label={t('Memory')}>
           <Row label={t("Manage {name}'s memory", { name: bot.name })} onPress={() => navigation.navigate('Memory', { id: bot.id, name: bot.name })} />
         </Section>}
