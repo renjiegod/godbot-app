@@ -127,6 +127,21 @@ export interface CapabilityItem {
   content?: string; items?: string[]; status?: string; approved?: boolean
 }
 
+export interface BotGoal {
+  id: string
+  objective: string
+  acceptance: string
+  sessionId?: string
+  status: 'active' | 'paused' | 'blocked' | 'completed' | 'stopped'
+  activity: 'queued' | 'running' | 'waiting' | null
+  turns: number
+  maxTurns: number
+  maxMinutes: number
+  revision: number
+  reason?: string
+  checkpoint?: { summary: string; evidence?: string; next?: string }
+}
+
 export interface TeamState {
   revision: number
   unchanged?: boolean
@@ -150,6 +165,7 @@ export interface TeamState {
   partActivity?: Record<string, number>
   sections?: { id: string; name: string; collapsed?: boolean; color?: string; description?: string }[]
   memory?: boolean
+  botGoals?: Record<string, BotGoal>
   questions?: Record<string, Question>
   views?: Record<string, ShownView>
   secretRequests?: Record<string, SecretRequest[]>

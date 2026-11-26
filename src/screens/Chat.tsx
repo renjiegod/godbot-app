@@ -22,6 +22,7 @@ import { ArrowDownIcon } from '../ui/icons.tsx'
 import { workPhrase } from '../ui/phrases.ts'
 import { ActionRow, Dock } from './chat/dock.tsx'
 import { Composer, type Photo } from './chat/composer.tsx'
+import { BotGoalCard } from './chat/bot-goal.tsx'
 import { Actions, Item, keysOf, PhotoViewer, PhotoViewerCtx, type ChatItem, type FileRef, type ImageRef } from './chat/items.tsx'
 import { ToolGroupCard } from './chat/tool-card.tsx'
 import { MemberWorkSheet } from './chat/member-work.tsx'
@@ -438,10 +439,30 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
       if (key === latestKey.current) setLoadError(failure instanceof Error ? failure.message : String(failure))
     }
   }, [call])
+  const [goalPanel, setGoalPanel] = useState<string | null>(null)
+  const canUseGoals = hello?.capabilities.includes('bot-goals') === true
+  const goalOwner = team?.bots.find(item => item.id === bot?.id)
+  const canWriteGoal = !team?.readOnly && (goalOwner?.sessionId === sessionId || goalOwner?.openParts?.some(part => part.sessionId === sessionId) === true)
   const latestKey = useRef(chatKey)
   latestKey.current = chatKey
   const send = async (text: string, photos: Photo[]) => {
     if (sessionReadOnly || team?.readOnly) return
+    const goal = bot && /^\/goal(?:\s+([\s\S]*))?$/iu.exec(text)
+    if (goal && bot) {
+      if (!canUseGoals || photos.length) {
+        setLoadError(t(canUseGoals ? 'Send goal attachments in a separate message.' : 'Update the Godbot host to use Bot goals.'))
+        return
+      }
+      try {
+        setLoadError(null)
+        if (goal[1]?.trim()) await call('bot-goal-command', { botId: bot.id, sessionId, input: goal[1], requestId: Date.now() + '-' + Math.random() })
+        refreshTeam?.()
+        if (latestKey.current === chatKey) setGoalPanel(chatKey)
+      } catch (failure) {
+        if (latestKey.current === chatKey) setLoadError(failure instanceof Error ? failure.message : String(failure))
+      }
+      return
+    }
     const localId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
     const entry: Outgoing = { item: { kind: 'user', text, local: 'sending', localId, time: Date.now(), ...(photos.length > 0 ? { localImages: photos.map(photo => photo.uri) } : {}) }, photos, sessionId }
     setOutbox(chatKey, list => [...list, entry])
@@ -459,7 +480,7 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
   }, [chatKey, deliver, sessionReadOnly, team?.readOnly])
   const stop = () => {
     if (room !== undefined) void call('stop-room-work', { roomId: room.id }).catch(() => {})
-    else if (bot !== undefined) void call('stop-chat', { botId: bot.id }).catch(() => {})
+    else if (bot !== undefined) void call('stop-chat', { botId: bot.id, sessionId }).catch(() => {})
   }
 
   // Chronological rows (oldest first) with stable keys and the desktop's time stamps.
@@ -576,6 +597,10 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
       {bot !== undefined ? <ComputerCards bot={bot} p={p} /> : null}
       {running && doingBot ? <ActionRow bot={doingBot} doing={doingText} p={p} dark={dark} conversation={conversation}
         onPress={memberWork && roomWork[0] !== undefined && workAt(roomWork[0]) !== undefined ? () => openWork(roomWork[0].botId, workAt(roomWork[0]) ?? {}) : undefined} /> : null}
+      {bot && canUseGoals && (canWriteGoal || team?.botGoals?.[sessionId]) ? <BotGoalCard key={chatKey}
+        botId={bot.id} sessionId={sessionId} goal={team?.botGoals?.[sessionId]} canWrite={canWriteGoal}
+        open={goalPanel === chatKey} onOpen={() => setGoalPanel(chatKey)} onClose={() => setGoalPanel(null)}
+        refresh={() => refreshTeam?.()} call={call} p={p} /> : null}
       <Dock question={question} sessionId={sessionId} approvals={approvals} secrets={secrets} connectorRequests={connectorRequests} botName={bot?.name} onOpenConnector={connectorId => { if (connectorCanConnectOnMobile(connectorId)) navigation.navigate('Settings', { screen: 'Connectors', params: { focusId: connectorId }, initial: false }) }} btw={btw} handoff={browserHold} view={team?.views?.[sessionId]} call={call} p={p} expanded={expandedKey} onExpand={setExpandedKey} />
       {fileError ? <Text style={[type.small, { color: p.danger, textAlign: 'center', marginBottom: 4 }]} accessibilityRole="alert">{fileError}</Text> : null}
       {page !== null && loadError !== null ? <Text style={[type.small, { color: p.danger, textAlign: 'center', marginBottom: 4, marginHorizontal: 16 }]} accessibilityRole="alert">{loadError}</Text> : null}
