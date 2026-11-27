@@ -1,18 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native'
+import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View, type GestureResponderEvent } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import type { Bot, TeamState } from '../connection.ts'
+import type { Bot, ModelOption, TeamState } from '../connection.ts'
 import { useTeam } from '../team/context.tsx'
 import { isLocalModel, modelRoute, modelsForBot } from '../team/bot-details.ts'
+import { EFFORT_NAMES, SPEED_NAMES, boltsOf, shownOptions, shownValue, speedOf, type Picks } from '../team/model-options.ts'
 import { t } from '../ui/i18n.ts'
-import { CheckIcon, ChevronRightIcon } from '../ui/icons.tsx'
+import { BoltIcon, CheckIcon, ChevronRightIcon } from '../ui/icons.tsx'
 import { radius, type as typeScale, useTheme } from '../ui/tokens.ts'
 
 // The desktop's model menu (ds-bot/src/client/model-menu.js) as a bottom sheet:
 // models grouped by provider, the default one marked, and the thinking-level
-// slider of the picked model under them.
+// slider and other options (speed and the like) of the picked model under them.
 
-type Model = NonNullable<TeamState['models']>[number] & { provider?: string; providerName?: string; reasoning?: Reasoning }
+type Model = NonNullable<TeamState['models']>[number] & { provider?: string; providerName?: string; reasoning?: Reasoning; options?: ModelOption[] }
 interface Reasoning { efforts?: { id: string; name: string }[]; defaultEffort?: string }
 
 export function groupModels(models: Model[]): [string, Model[]][] {
@@ -43,31 +44,40 @@ export function modelOf(bot: Bot, models: Model[]): { ref: string; name: string;
   return { ref, name, provider: served?.providerName ?? provider, served: served !== undefined }
 }
 
-// The thinking levels of one model. The catalog carries them for models Bots use;
-// any other ref asks the computer once.
-export function useReasoning(ref: string | undefined, models: Model[]): Reasoning | null | undefined {
+// What one model offers besides itself: its thinking levels and its other options
+// (speed and the like). The catalog carries the levels for models Bots use and a local
+// agent's options; any other ref asks the computer once, in the same answer.
+export function useModelTraits(ref: string | undefined, models: Model[]): { reasoning: Reasoning | null | undefined; options: ModelOption[] | undefined } {
   const { call, computer, hello, online } = useTeam()
-  const served = models.find(model => model.ref === ref)?.reasoning
+  const served = models.find(model => model.ref === ref)
   const key = `${computer?.hostDeviceId ?? ''}:${hello?.boot ?? ''}:${ref ?? ''}`
-  const [fetched, setFetched] = useState<{ key: string; reasoning: Reasoning | null } | null>(null)
+  const [fetched, setFetched] = useState<{ key: string; reasoning: Reasoning | null; options: ModelOption[] | undefined } | null>(null)
   useEffect(() => {
-    if (!online || ref === undefined || served !== undefined) return
+    if (!online || ref === undefined || served?.reasoning !== undefined) return
     let live = true
     call('efforts', { ref }).then(value => {
-      const reasoning = (value as Reasoning)?.efforts ? value as Reasoning : null
-      if (live) setFetched({ key, reasoning })
+      const answer = value as (Reasoning & { options?: ModelOption[] }) | undefined
+      const reasoning = answer?.efforts ? { efforts: answer.efforts, defaultEffort: answer.defaultEffort } : null
+      if (live) setFetched({ key, reasoning, options: Array.isArray(answer?.options) ? answer.options : undefined })
     }).catch(() => {})
     return () => { live = false }
-  }, [call, key, online, served !== undefined])
-  return served ?? (fetched?.key === key ? fetched.reasoning : undefined)
+  }, [call, key, online, served?.reasoning !== undefined])
+  const own = fetched?.key === key ? fetched : undefined
+  return { reasoning: served?.reasoning ?? own?.reasoning, options: served?.options ?? own?.options }
 }
+
+// A thinking level or speed by its usual id in the phone's language; any other keeps its CLI's name.
+const effortName = (effort: { id: string; name?: string }) => (EFFORT_NAMES[effort.id] ? t(EFFORT_NAMES[effort.id]) : effort.name ?? effort.id)
+const speedName = (value: { id: string; name?: string }) => (SPEED_NAMES[value.id] ? t(SPEED_NAMES[value.id]) : value.name ?? value.id)
 
 export function effortLabel(reasoning: Reasoning | null | undefined, effort: string | undefined): string | undefined {
   const efforts = reasoning?.efforts ?? []
   if (efforts.length === 0) return undefined
   const picked = efforts.some(e => e.id === effort) ? effort : undefined
   const current = picked ?? reasoning?.defaultEffort
-  return current === undefined ? t('Default') : efforts.find(e => e.id === current)?.name ?? current
+  if (current === undefined) return t('Default')
+  const level = efforts.find(e => e.id === current)
+  return level ? effortName(level) : current
 }
 
 // When the model names its default level the stops are the levels and a reset
@@ -76,7 +86,7 @@ function effortStops(reasoning: Reasoning | null | undefined): { effort?: string
   const efforts = reasoning?.efforts ?? []
   if (efforts.length === 0) return []
   const hasDefault = efforts.some(effort => effort.id === reasoning?.defaultEffort)
-  const levels = efforts.map(effort => ({ effort: effort.id, label: effort.name }))
+  const levels = efforts.map(effort => ({ effort: effort.id, label: effortName(effort) }))
   return hasDefault ? levels : [{ label: t('Default') }, ...levels]
 }
 
@@ -199,6 +209,65 @@ export function ModelPicker({ current, onPick, hostedOnly }: { current?: string;
   )
 }
 
+// The model's other options under its thinking level, as on the desktop: Speed (and
+// any choice of a few values) as segments, an on/off option as a switch. Each pick
+// saves on the Bot at once; Default hands the option back to the agent's own setting.
+function ModelOptionsSection({ options, picks, disabled, onPick }: { options: ModelOption[] | undefined; picks: Picks; disabled: boolean; onPick: (id: string, value: string | boolean | null) => void }) {
+  const { p } = useTheme()
+  const list = shownOptions(options)
+  if (list.length === 0) return null
+  return (
+    <View style={{ gap: 12, paddingHorizontal: 16, paddingVertical: 10 }} pointerEvents={disabled ? 'none' : 'auto'}>
+      {list.map(option => {
+        const { value, picked } = shownValue(option, picks)
+        const label = option.id === 'speed' ? t('Speed') : option.name ?? option.id
+        // The same reset as the thinking level's: a pick shows ↺, no pick says Default.
+        const reset = picked ? (
+          <Pressable accessibilityRole="button" accessibilityLabel={t('Default')} hitSlop={10} onPress={() => onPick(option.id, null)}
+            style={{ width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: p.hover }}>
+            <Text style={{ color: p.ink2, fontSize: 13 }}>↺</Text>
+          </Pressable>
+        ) : <Text style={[typeScale.caption, { color: p.ink3 }]}>{t('Default')}</Text>
+        if (option.type === 'toggle') return (
+          <View key={option.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={[typeScale.caption, { color: p.ink3, fontWeight: '500' }]}>{label}</Text>
+              {option.description ? <Text style={[typeScale.small, { color: p.ink3 }]} numberOfLines={2}>{option.description}</Text> : null}
+            </View>
+            {reset}
+            <Switch accessibilityLabel={label} value={value === true} onValueChange={next => onPick(option.id, next)} />
+          </View>
+        )
+        const values = option.values ?? []
+        const active = values.find(entry => entry.id === value)
+        return (
+          <View key={option.id} style={{ gap: 6 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 20 }}>
+              <Text style={[typeScale.caption, { color: p.ink3, fontWeight: '500' }]}>{label}</Text>
+              {reset}
+            </View>
+            <View accessibilityRole="radiogroup" accessibilityLabel={label} style={[styles.segments, { backgroundColor: p.hover, borderColor: p.line }]}>
+              {values.map(entry => {
+                const checked = entry.id === value
+                const bolts = option.id === 'speed' ? boltsOf(option, entry.id) : 0
+                return (
+                  <Pressable key={entry.id} accessibilityRole="radio" accessibilityState={{ checked }} accessibilityLabel={speedName(entry)}
+                    onPress={() => { if (!checked || !picked) onPick(option.id, entry.id) }}
+                    style={[styles.segment, checked ? { backgroundColor: p.card, borderColor: p.line } : null]}>
+                    {bolts > 0 ? <BoltIcon count={bolts} size={11} color={checked ? '#d97706' : p.ink3} /> : null}
+                    <Text style={[typeScale.caption, { color: checked ? p.ink : p.ink2, fontWeight: checked ? '600' : '500' }]} numberOfLines={1}>{speedName(entry)}</Text>
+                  </Pressable>
+                )
+              })}
+            </View>
+            {active?.description ? <Text style={[typeScale.small, { color: p.ink3 }]}>{t(active.description)}</Text> : null}
+          </View>
+        )
+      })}
+    </View>
+  )
+}
+
 // The trigger shows the model name over its provider and thinking level, as on the desktop.
 export function ModelMenu({ bot, onManage, readOnly = false }: { bot: Bot; onManage: () => void; readOnly?: boolean }) {
   const { p } = useTheme()
@@ -213,8 +282,13 @@ export function ModelMenu({ bot, onManage, readOnly = false }: { bot: Bot; onMan
   const model = modelOf(bot, catalog)
   const models = modelsForBot(catalog, model?.ref)
   const local = isLocalModel(model?.ref)
-  const reasoning = useReasoning(model?.ref, catalog)
+  const { reasoning, options } = useModelTraits(model?.ref, catalog)
   const level = effortLabel(reasoning, bot.effort)
+  // A faster speed shows in the trigger, as a bolt does in the desktop's header.
+  const speed = speedOf(options, bot.modelOptions)
+  const fastName = speed !== undefined && speed.bolts > 0
+    ? speedName({ id: speed.valueId, name: speed.option.values?.find(value => value.id === speed.valueId)?.name })
+    : undefined
   const save = async (patch: Record<string, unknown>) => {
     if (readOnly || saving.current) return
     saving.current = true
@@ -248,9 +322,12 @@ export function ModelMenu({ bot, onManage, readOnly = false }: { bot: Bot; onMan
         disabled={readOnly} onPress={() => void show()}
         style={[styles.trigger, { backgroundColor: p.card, borderColor: p.line }]}>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={[typeScale.settingsRow, { color: p.ink, fontWeight: '500' }]} numberOfLines={1}>{model?.name ?? t('Choose a model')}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <Text style={[typeScale.settingsRow, { color: p.ink, fontWeight: '500', flexShrink: 1 }]} numberOfLines={1}>{model?.name ?? t('Choose a model')}</Text>
+            {model && speed !== undefined && fastName !== undefined ? <BoltIcon count={speed.bolts} size={11} /> : null}
+          </View>
           {model ? <Text style={[typeScale.caption, { color: p.ink3 }]} numberOfLines={1}>{model.served || models.length === 0
-            ? [model.provider, level].filter(Boolean).join(' · ')
+            ? [model.provider, level, fastName].filter(Boolean).join(' · ')
             : t('{provider} · not available', { provider: model.provider })}</Text> : null}
         </View>
         {readOnly ? null : <Text style={{ color: p.ink3, fontSize: 12 }}>⌄</Text>}
@@ -273,6 +350,11 @@ export function ModelMenu({ bot, onManage, readOnly = false }: { bot: Bot; onMan
                 disabled={writing} onPick={effort => void save({ effort: effort ?? null })} />
             </View>
           ) : null}
+          {model && shownOptions(options).length > 0 && !readOnly ? (
+            <View style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: p.line }}>
+              <ModelOptionsSection options={options} picks={bot.modelOptions} disabled={writing} onPick={(id, value) => void save({ modelOptions: { [id]: value } })} />
+            </View>
+          ) : null}
           {local || readOnly ? null : <Pressable accessibilityRole="button" onPress={() => { setOpen(false); onManage() }}
             style={[styles.row, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: p.line }]}>
             <Text style={[typeScale.settingsRow, { color: p.ink, flex: 1 }]}>{t('Models and providers…')}</Text>
@@ -291,4 +373,6 @@ const styles = StyleSheet.create({
   grab: { alignSelf: 'center', width: 36, height: 4, borderRadius: 2, marginBottom: 4 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 48, paddingHorizontal: 16 },
   feedback: { paddingHorizontal: 16, paddingVertical: 8 },
+  segments: { flexDirection: 'row', gap: 2, padding: 2, borderRadius: 10, borderWidth: StyleSheet.hairlineWidth },
+  segment: { flex: 1, minWidth: 0, minHeight: 34, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: 'transparent', paddingHorizontal: 6 },
 })

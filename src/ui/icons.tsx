@@ -139,3 +139,11 @@ export function SideIcon({ size = 20, color }: IconProps) {
     </Svg>
   )
 }
+
+// A filled bolt for a model's speed: one for a faster tier, two for the fastest.
+export function BoltIcon({ size = 12, color, count = 1 }: IconProps & { count?: number }) {
+  const bolt = 'M8.6 1.5 3 9.1h4.1L6.3 14.5 12 6.6H7.9z'
+  return h(Svg, { width: count > 1 ? size * 1.45 : size, height: size, viewBox: count > 1 ? '0 0 22 16' : '0 0 15 16', fill: color ?? '#d97706' },
+    h(Path, { d: bolt }),
+    count > 1 ? h(Path, { d: bolt, transform: 'translate(7.5 0)' }) : null)
+}

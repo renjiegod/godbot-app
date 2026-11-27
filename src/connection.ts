@@ -27,6 +27,17 @@ export interface FailoverEvent {
   roomId?: string
 }
 
+// An option a local agent's model offers besides its thinking level, as the computer
+// describes it for every agent alike (dsh-godbot core/local-agents/model-options.js).
+export interface ModelOption {
+  id: string
+  type: 'select' | 'toggle'
+  name?: string
+  description?: string
+  values?: { id: string; name?: string; description?: string }[]
+  defaultValue?: string | boolean
+}
+
 export interface Bot {
   id: string
   name: string
@@ -45,6 +56,9 @@ export interface Bot {
   capabilities?: string[]
   browser?: boolean
   effort?: string
+  // Picks for the model's other options by option id (speed and the like); unset ones
+  // follow the agent's own setting.
+  modelOptions?: Record<string, string | boolean>
   workDir?: string
   main?: boolean
   private?: boolean
@@ -149,7 +163,7 @@ export interface TeamState {
   rooms?: Room[]
   mainBotId?: string | null
   mainBotIds?: string[]
-  models?: { ref: string; name: string; id?: string; provider?: string; providerName?: string; needsKey?: boolean }[]
+  models?: { ref: string; name: string; id?: string; provider?: string; providerName?: string; needsKey?: boolean; options?: ModelOption[] }[]
   modelsKey?: string
   defaultModel?: string | null
   permissions?: { options?: { value: string; name: string }[]; defaultPreset?: string } | null
