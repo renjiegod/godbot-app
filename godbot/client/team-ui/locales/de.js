@@ -1824,6 +1824,8 @@ export const DE = {
   "A running session keeps using model calls in the background.": "Eine laufende Sitzung verbraucht weiterhin Modellaufrufe im Hintergrund.",
   "Switch session": "Sitzung wechseln",
   "{count} running in the background": "{count} laufen im Hintergrund",
+  "Working in the background": "Arbeitet im Hintergrund",
+  "Replies when done": "Antwortet, sobald es fertig ist",
 }
 
 export const HOST_ERRORS_DE = [

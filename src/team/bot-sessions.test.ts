@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { Bot, TeamState } from '../connection.ts'
 import { hostText, setLang, t } from '../ui/i18n.ts'
-import { backgroundRunning, botSessions, elsewhere, parallelSessions, partWork, sessionLabel, sessionMeta, switchable, unknownEndpoint } from './bot-sessions.ts'
+import { backgroundRunning, botSessions, elsewhere, parallelSessions, partWork, sessionLabel, sessionMeta, switchable, unknownEndpoint, worksInBackground } from './bot-sessions.ts'
 
 setLang('en')
 
@@ -158,4 +158,24 @@ test('the chat shows the work of the part on screen, not of one in the backgroun
   assert.deepEqual(partWork(bot, 'p4', { ...busy, partsRunning: {} }), { tool: 'shell', since: 600 })
   assert.deepEqual(partWork(bot, 'p4', { ...busy, partsRunning: undefined }), { tool: 'shell', since: 600 })
   assert.equal(partWork(bot, 'p4', { ...busy, work: {} }), undefined)
+})
+
+// The report: the turn on screen ended while its CLI waits on a background task (p4),
+// and p6 runs a turn beside it. The session list marks both Running, so the team list
+// counts both, and the chat on p4 shows its own background work, not p6's tools.
+test('a part whose turn ended while its background work goes on runs in the background', () => {
+  const state: TeamState = { ...team, partsRunning: { p4: true, p6: true }, work: { bots: { p1: { tool: 'shell', since: 600 } }, turns: { p6: 600 } } }
+  assert.equal(worksInBackground(state, 'p4'), true)
+  assert.equal(worksInBackground(state, 'p6'), false, 'a turn runs in p6')
+  assert.equal(worksInBackground(state, 'p2'), false)
+  assert.equal(backgroundRunning(bot, state), 2)
+  assert.equal(botSessions(bot, state).filter(entry => entry.running).length, 2, 'the same two the session list marks Running')
+  assert.equal(partWork(bot, 'p4', state), undefined, "p6's tools are not p4's")
+  // A DSH subagent of p4 with no turn anywhere: the Bot's entry is p4's own.
+  const helper: TeamState = { ...team, partsRunning: { p4: true }, work: { bots: { p1: { tool: 'subagent', since: 700 } }, turns: {} } }
+  assert.deepEqual(partWork(bot, 'p4', helper), { tool: 'subagent', since: 700 })
+  assert.equal(backgroundRunning(bot, helper), 1)
+  // A host that sends no turns: p4 may run a turn, so only the part beside it counts.
+  assert.equal(worksInBackground({ ...state, work: { bots: {} } }, 'p4'), false)
+  assert.equal(backgroundRunning(bot, { ...state, work: { bots: {} } }), 1)
 })

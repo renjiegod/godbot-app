@@ -2125,6 +2125,8 @@ const ZH = {
   "A running session keeps using model calls in the background.": "运行中的会话会在后台继续消耗模型调用。",
   "Switch session": "切换会话",
   "{count} running in the background": "{count} 个会话在后台运行",
+  "Working in the background": "后台任务运行中",
+  "Replies when done": "完成后会接着回复",
 }
 
 // Host errors stay English, since Bots read them too; they are translated where the

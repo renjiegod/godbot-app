@@ -306,7 +306,8 @@ export function HandoffCard({ handoff, botId, onView, call, p , bare = false }: 
 
 // What a Bot is doing, above the composer. In a group, `onPress` opens the work of the
 // member it names (the member's work sheet).
-export function ActionRow({ bot, doing, p, dark, conversation, onPress }: { bot: Bot; doing: string; p: Palette; dark: boolean; conversation: boolean; onPress?: () => void }) {
+// `note` follows the phrase in a quieter ink: what comes of work that has no turn to time.
+export function ActionRow({ bot, doing, note, p, dark, conversation, onPress }: { bot: Bot; doing: string; note?: string; p: Palette; dark: boolean; conversation: boolean; onPress?: () => void }) {
   const reduced = useReducedMotion()
   const shimmer = useSharedValue(0.35)
   useEffect(() => {
@@ -317,6 +318,7 @@ export function ActionRow({ bot, doing, p, dark, conversation, onPress }: { bot:
   const inner = <>
     <Avatar bot={bot} dark={dark} size={conversation ? 24 : 28} ring={p.main} working />
     <Animated.Text style={[conversation ? type.small : type.rowPreview, { color: p.ink2, marginLeft: 8, flex: 1 }, style]} numberOfLines={1}>{doing}…</Animated.Text>
+    {note !== undefined ? <Text style={[type.small, { color: p.ink3, marginLeft: 8 }]} numberOfLines={1}>{note}</Text> : null}
     {onPress !== undefined ? <ChevronRightIcon size={16} color={p.ink3} /> : null}
   </>
   const frame = [styles.action, conversation && [styles.conversationAction, { borderTopColor: p.line }]]
