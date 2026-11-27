@@ -1211,6 +1211,9 @@ const ZH = {
   'Showing the {count} newest': '只显示最新 {count} 条',
 
   // Bot exchange
+  'Queued': '已入队',
+  'Engine accepted': '引擎已接收',
+  'Delivery blocked': '投递受阻',
   'Bot exchange': 'Bot 间对话',
   'Bot exchange transcript': 'Bot 间对话记录',
   'No messages yet': '还没有消息',
