@@ -297,6 +297,7 @@ export const JA = {
   "Change and start a new part": "変更して新しいパートを開始",
   "Local agents": "ローカルエージェント",
   "Local agent usage": "ローカルエージェントの使用量",
+  "{name}'s local agent usage": "{name} のローカルエージェントの使用量",
   // Add-provider form
   "Still needed: {fields}": "まだ必要: {fields}",
   "At least one model": "モデルを1つ以上",

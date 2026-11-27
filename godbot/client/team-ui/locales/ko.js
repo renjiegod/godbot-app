@@ -303,6 +303,7 @@ export const KO = {
   // Local agents page
   'Local agents': '로컬 Agent',
   'Local agent usage': '로컬 Agent 사용량',
+  '{name}\'s local agent usage': '{name}의 로컬 Agent 사용량',
   // Add-provider form
   'Still needed: {fields}': '아직 필요: {fields}',
   'At least one model': '모델 하나 이상',

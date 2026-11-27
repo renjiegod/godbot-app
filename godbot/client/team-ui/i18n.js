@@ -432,6 +432,7 @@ const ZH = {
   // Local agents page
   'Local agents': '本地 Agent',
   'Local agent usage': '本地 Agent 用量',
+  '{name}\'s local agent usage': '{name} 的本地 Agent 用量',
   'Sandboxes': '沙箱',
   'Open Sandbox settings': '打开沙箱设置',
   'There is no sandbox available for {provider}. Create one in Sandbox settings.': '没有可添加的隔离环境。前往沙箱设置可自动创建支持 {provider} 的环境。',

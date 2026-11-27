@@ -303,6 +303,7 @@ export const ES = {
   // Local agents page
   'Local agents': 'Agentes locales',
   'Local agent usage': 'Uso de agentes locales',
+  '{name}\'s local agent usage': 'Uso de agentes locales de {name}',
   // Add-provider form
   "Still needed: {fields}": "Falta: {fields}",
   "At least one model": "Al menos un modelo",

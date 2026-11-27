@@ -297,6 +297,7 @@ export const FR = {
   "Change and start a new part": "Modifier et démarrer une nouvelle partie",
   "Local agents": "Agents locaux",
   "Local agent usage": "Utilisation des agents locaux",
+  "{name}'s local agent usage": "Utilisation des agents locaux de {name}",
   // Add-provider form
   "Still needed: {fields}": "Encore nécessaire : {fields}",
   "At least one model": "Au moins un modèle",
