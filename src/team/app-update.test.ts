@@ -16,7 +16,8 @@ test('a manifest is checked and its download address made absolute', () => {
   const base = 'https://relay.example.org/app/latest.json'
   const manifest = parseManifest({ versionName: '0.2.0', versionCode: 200099, url: '/download/godbot-0.2.0.apk', sha256: sha.toUpperCase(), size: 123, notes: 'Push' }, base)
   assert.deepEqual(manifest, { versionName: '0.2.0', versionCode: 200099, url: 'https://relay.example.org/download/godbot-0.2.0.apk', sha256: sha, size: 123, notes: 'Push' })
-  assert.equal(parseManifest({ versionName: '0.2.0', versionCode: 1, url: 'godbot.apk', sha256: sha, size: 1 }, base).url, 'https://relay.example.org/app/godbot.apk')
+  assert.equal(parseManifest({ versionName: '0.2.0', versionCode: 1, url: 'godbot.apk', sha256: sha, size: 1 }, base).url, 'https://relay.example.org/download/godbot.apk')
+  assert.equal(parseManifest({ versionName: '0.2.0', versionCode: 1, url: './godbot.apk?channel=stable', sha256: sha, size: 1 }, base).url, 'https://relay.example.org/download/godbot.apk?channel=stable')
   assert.equal(parseManifest({ versionName: '0.2.0', versionCode: 1, url: 'https://cdn.example.org/g.apk', sha256: sha, size: 1 }, base).url, 'https://cdn.example.org/g.apk')
 })
 
