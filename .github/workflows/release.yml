@@ -48,10 +48,6 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
       - name: Check the commit is on main and its version is unpublished
         shell: bash
         run: |
@@ -76,6 +72,15 @@ jobs:
             exit 1
           fi
       - run: npm ci
+      # Restores what Gradle downloads (Gradle itself, the dependencies, their transforms)
+      # from a cache keyed on every *.gradle file, those of the native modules npm ci just
+      # installed included, so changing a dependency starts a new cache. Gradle's build
+      # cache stays off: the APK is still compiled from source.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
       - run: npm run typecheck
       - run: npm test
       - name: Check the synced Godbot files come from a dsh-godbot commit
@@ -109,7 +114,11 @@ jobs:
           } >> "$GITHUB_ENV"
       - name: Build the release APK
         working-directory: android
-        run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a
+        # Then stop Gradle's daemon: it goes on writing to ~/.gradle after the build, and the
+        # cache setup-java saves at the end of the job fails if it changes while being read.
+        run: |
+          ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a
+          ./gradlew --stop
       - name: Describe the candidate
         shell: bash
         run: |

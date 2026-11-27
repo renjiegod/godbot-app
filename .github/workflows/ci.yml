@@ -53,11 +53,16 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - run: npm ci
+      # Restores what Gradle downloads (Gradle itself, the dependencies, their transforms)
+      # from a cache keyed on every *.gradle file, those of the native modules npm ci just
+      # installed included, so changing a dependency starts a new cache. Gradle's build
+      # cache stays off: every APK is still compiled from source.
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
-      - run: npm ci
+          cache: gradle
       - run: npx expo prebuild --platform android --no-install
       # Builds of main are signed with the release key and must have it: a debug-signed
       # APK can never update installed copies. Pull requests get no secrets; their APK
@@ -83,7 +88,11 @@ jobs:
           } >> "$GITHUB_ENV"
       - name: Build the release APK
         working-directory: android
-        run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a
+        # Then stop Gradle's daemon: it goes on writing to ~/.gradle after the build, and the
+        # cache setup-java saves at the end of the job fails if it changes while being read.
+        run: |
+          ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a
+          ./gradlew --stop
       - name: Check the APK is signed with the release certificate
         if: github.event_name != 'pull_request'
         run: node scripts/release-apk.mjs check-signature android/app/build/outputs/apk/release/app-release.apk
