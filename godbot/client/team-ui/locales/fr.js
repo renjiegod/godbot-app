@@ -774,6 +774,8 @@ export const FR = {
   "Clear completed": "Effacer les tâches terminées",
   "Rename group": "Renommer le groupe",
   "Copy conversation ID": "Copier l’ID de la discussion",
+  "Copy session ID": "Copier l’ID de la session",
+  "Session ID copied": "ID de la session copié",
   "Hide from sidebar": "Masquer de la barre latérale",
   "{name} actions": "Actions pour {name}",
   "Add DSH Agent": "Ajouter DSH Agent",

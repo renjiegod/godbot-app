@@ -12,6 +12,7 @@ import { useTeam } from '../../team/context.tsx'
 import { botSessions, currentPart, elsewhere, parallelSessions, sessionLabel, sessionMeta, switchable, unknownEndpoint, type BotSession } from '../../team/bot-sessions.ts'
 import { hostText, t } from '../../ui/i18n.ts'
 import { ChatsIcon, NewSessionIcon } from '../../ui/icons.tsx'
+import { CopyIdButton } from '../../ui/copy-id.tsx'
 import { shadow, type as typeScale, useTheme, type Palette } from '../../ui/tokens.ts'
 
 // Computers that turned bot-open-part or bot-new-part away as unknown, by link boot: the
@@ -174,16 +175,21 @@ export function SessionRow({ entry, label, p, opening, disabled, onPress }: {
   const meta = sessionMeta(entry)
   const hint = entry.current ? t('Current session') : entry.running ? t('Open this running session') : entry.background ? t('Open this session') : t('Open this earlier session')
   const off = disabled || entry.current
+  // The copy button sits beside the row, not in it, so TalkBack reaches both and a
+  // copy never opens the session. It copies the current session too.
   return (
-    <Pressable testID={`session-${entry.id}`} accessibilityRole="button" accessibilityLabel={[label, meta.text].filter(Boolean).join(', ')} accessibilityHint={hint}
-      accessibilityState={{ selected: entry.current, disabled: off, busy: opening }} disabled={off} onPress={onPress}
-      style={({ pressed }) => [styles.row, { backgroundColor: entry.current || (pressed && !off) ? p.hover : 'transparent' }]}>
-      <View style={styles.mark}><SessionMark entry={entry} p={p} /></View>
-      <Text style={[typeScale.settingsRow, { flex: 1, color: p.ink, fontWeight: entry.current ? '600' : '400' }]} numberOfLines={2}>{label}</Text>
-      {opening
-        ? <ActivityIndicator size="small" color={p.accent} accessibilityLabel={t('Opening this session…')} />
-        : meta.text !== '' ? <Text style={[typeScale.caption, { color: meta.tone === 'wait' ? p.accent : meta.tone === 'run' ? p.green : p.ink3, flexShrink: 0 }]}>{meta.text}</Text> : null}
-    </Pressable>
+    <View style={[styles.rowWrap, { backgroundColor: entry.current ? p.hover : 'transparent' }]}>
+      <Pressable testID={`session-${entry.id}`} accessibilityRole="button" accessibilityLabel={[label, meta.text].filter(Boolean).join(', ')} accessibilityHint={hint}
+        accessibilityState={{ selected: entry.current, disabled: off, busy: opening }} disabled={off} onPress={onPress}
+        style={({ pressed }) => [styles.row, styles.rowMain, { backgroundColor: pressed && !off ? p.hover : 'transparent' }]}>
+        <View style={styles.mark}><SessionMark entry={entry} p={p} /></View>
+        <Text style={[typeScale.settingsRow, { flex: 1, color: p.ink, fontWeight: entry.current ? '600' : '400' }]} numberOfLines={2}>{label}</Text>
+        {opening
+          ? <ActivityIndicator size="small" color={p.accent} accessibilityLabel={t('Opening this session…')} />
+          : meta.text !== '' ? <Text style={[typeScale.caption, { color: meta.tone === 'wait' ? p.accent : meta.tone === 'run' ? p.green : p.ink3, flexShrink: 0 }]}>{meta.text}</Text> : null}
+      </Pressable>
+      <CopyIdButton id={entry.id} testID={`session-copy-${entry.id}`} />
+    </View>
   )
 }
 
@@ -208,6 +214,8 @@ const styles = StyleSheet.create({
   divider: { height: StyleSheet.hairlineWidth, marginTop: 2 },
   list: { flexGrow: 0 },
   row: { minHeight: 52, paddingHorizontal: 16, paddingVertical: 8, gap: 10, flexDirection: 'row', alignItems: 'center' },
+  rowWrap: { flexDirection: 'row', alignItems: 'center', paddingRight: 8 },
+  rowMain: { flex: 1, paddingRight: 4 },
   closeRow: { borderTopWidth: StyleSheet.hairlineWidth, minHeight: 48 },
   mark: { width: 26, alignItems: 'center', justifyContent: 'center' },
   dot: { width: 8, height: 8, borderRadius: 4 },

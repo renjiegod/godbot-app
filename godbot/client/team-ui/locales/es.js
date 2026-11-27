@@ -774,6 +774,8 @@ export const ES = {
   'Clear completed': 'Borrar completadas',
   'Rename group': 'Renombrar grupo',
   'Copy conversation ID': 'Copiar ID de conversación',
+  'Copy session ID': 'Copiar ID de la sesión',
+  'Session ID copied': 'ID de la sesión copiado',
   'Hide from sidebar': 'Ocultar de la barra lateral',
   '{name} actions': 'Acciones de {name}',
   // The DSH Agent's own row and Session list. "DSH Agent" is a product name and

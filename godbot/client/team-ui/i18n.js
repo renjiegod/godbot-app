@@ -997,6 +997,8 @@ const ZH = {
   'Clear completed': '清除已完成',
   'Rename group': '重命名群聊',
   'Copy conversation ID': '复制对话 ID',
+  'Copy session ID': '复制会话 ID',
+  'Session ID copied': '已复制会话 ID',
   'Hide from sidebar': '从侧栏隐藏',
   '{name} actions': '{name} 的操作',
   // The DSH Agent's own row and Session list. "DSH Agent" is a product name and
