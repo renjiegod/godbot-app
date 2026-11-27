@@ -774,6 +774,8 @@ export const JA = {
   "Clear completed": "完了済みを消去",
   "Rename group": "グループ名を変更",
   "Copy conversation ID": "会話 ID をコピー",
+  "Copy session ID": "セッション ID をコピー",
+  "Session ID copied": "セッション ID をコピーしました",
   "Hide from sidebar": "サイドバーから隠す",
   "{name} actions": "{name} の操作",
   "Add DSH Agent": "DSH Agent を追加",

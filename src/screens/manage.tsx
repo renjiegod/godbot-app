@@ -16,8 +16,9 @@ import { DEMO, useTeam } from '../team/context.tsx'
 import { legacyAutomationView, type AutomationView } from '../team/automation.ts'
 import { memorySummaryText } from '../team/memory.ts'
 import { botPrivacyBlock, isLocalModel, modelRoute, sessionFigures, sessionUsage, type SessionStats } from '../team/bot-details.ts'
-import { botSessions, sessionLabel } from '../team/bot-sessions.ts'
+import { botSessions, currentPart, sessionLabel } from '../team/bot-sessions.ts'
 import { SessionRow, useSessionsAvailable, useSessionSwitch } from './chat/sessions.tsx'
+import { SessionIdLine } from '../ui/copy-id.tsx'
 import { connectorRows } from '../team/connectors.ts'
 import { BotFailoverEditor, FailoverActivity } from './bot-failover.tsx'
 import { folderPlan, type FolderPlan, type FoldersView } from '../team/folders.ts'
@@ -236,6 +237,7 @@ export function BotDetails({ route, navigation }: any) {
           <View style={styles.detailIdentity}>
             <Avatar bot={bot} dark={dark} size={64} ring={p.main} />
             <DetailIdentity bot={bot} writable={writable} save={save} />
+            <SessionIdLine id={currentPart(bot)} testID="bot-session-copy" />
           </View>
           <View style={[styles.tabs, { backgroundColor: p.hover }]} accessibilityRole="tablist">
             <View accessibilityRole="tab" accessibilityState={{ selected: true }} style={[styles.tab, { backgroundColor: p.card }]}><Text style={[typeScale.small, { color: p.ink, fontWeight: '500' }]}>{t('Details')}</Text></View>
@@ -877,6 +879,7 @@ export function GroupDetails({ route, navigation }: any) {
           <RoomAvatar room={room} bots={bots} dark={dark} size={56} ring={p.main} />
           <Text style={[typeScale.rowName, { color: p.ink, marginTop: 10, fontSize: 18, textAlign: 'center' }]}>{room.name}</Text>
           <Text style={[typeScale.caption, { color: p.ink3, marginTop: 2 }]}>{[t('{count} members', { count: members.length }), admin ? t('Admin {name}', { name: admin.name }) : t('No admin')].join(' · ')}</Text>
+          <SessionIdLine id={room.sessionId ?? room.id} testID="group-session-copy" />
         </View>
         {notice
           ? <Text style={[typeScale.small, { color: p.ink2, marginTop: 14 }]} numberOfLines={5}>{notice}</Text>

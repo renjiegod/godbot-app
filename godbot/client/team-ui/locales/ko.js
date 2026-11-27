@@ -774,6 +774,8 @@ export const KO = {
   'Clear completed': '완료 항목 지우기',
   'Rename group': '그룹 이름 변경',
   'Copy conversation ID': '대화 ID 복사',
+  'Copy session ID': '세션 ID 복사',
+  'Session ID copied': '세션 ID를 복사했습니다',
   'Hide from sidebar': '사이드바에서 숨기기',
   '{name} actions': '{name} 작업',
   // The DSH Agent's own row and Session list. "DSH Agent" is a product name and

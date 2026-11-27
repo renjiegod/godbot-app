@@ -151,7 +151,8 @@ async function openChatOf(name) {
 
 async function openBotDetails(name) {
   await openChatOf(name)
-  const pill = await waitFor(nodes => nodes.find(node => node.clickable && node.desc === name), `${name}'s chat header`)
+  // In the conversation layout the pill also reads out the Bot's model: "name, model".
+  const pill = await waitFor(nodes => nodes.find(node => node.clickable && (node.desc === name || node.desc.startsWith(name + ', '))), `${name}'s chat header`)
   tap(pill)
   await wait(`${name}'s details`, 'Edit Bot')
   await sleep(500)
@@ -259,6 +260,12 @@ async function main() {
       r.write += ', Android rename confirmed through Web'
       await wait('the sessions heading', 'Sessions')
       shot('parity-details')
+      // The details show the open conversation's session ID, and its button copies it.
+      const byId = suffix => nodes => nodes.find(node => node.id.endsWith(suffix))
+      await wait('the conversation ID on the details', first)
+      tap(await waitFor(byId('bot-session-copy'), 'the conversation ID copy button'))
+      await waitFor(nodes => byId('bot-session-copy')(nodes)?.desc === 'Session ID copied', 'the conversation ID copied')
+      r.read += ', conversation ID shown and copied'
       tap(await scrollTo(nodes => find(nodes, 'Read only'), 'the host Read only permission'))
       await until(activeBot, value => value?.permission === 'read-only', 'the Android permission change on Web')
       r.write += ', Android permission change confirmed through Web'
@@ -275,6 +282,11 @@ async function main() {
       r.write += ', Android session changes confirmed through Web'
       await wait('the original transcript on Android', firstMessage)
       await tapOn('the chat session list', 'Sessions')
+      // Each row copies its own session ID without opening it.
+      tap(await waitFor(byId('session-copy-' + next.sessionId), 'the copy button of a session row'))
+      await waitFor(nodes => byId('session-copy-' + next.sessionId)(nodes)?.desc === 'Session ID copied', 'the session row ID copied')
+      if ((await activeBot()).sessionId !== first) throw new Error('Copying a session ID opened that session')
+      shot('session-copy-id')
       const waitSessionOrder = (top, other, what) => waitFor(nodes => {
         const before = nodes.find(node => node.id.endsWith('session-' + top))
         const after = nodes.find(node => node.id.endsWith('session-' + other))
@@ -393,6 +405,11 @@ async function main() {
     await openChatOf(room.name)
     const pill = await waitFor(nodes => nodes.find(node => node.text === room.name && node.bounds.y2 < 320), 'the group header')
     tap(pill)
+    // The group details show the group's session ID, and its button copies it.
+    const groupCopy = nodes => nodes.find(node => node.id.endsWith('group-session-copy'))
+    await wait('the group conversation ID', room.sessionId ?? room.id)
+    tap(await waitFor(groupCopy, 'the group ID copy button'))
+    await waitFor(nodes => groupCopy(nodes)?.desc === 'Session ID copied', 'the group ID copied')
     await tapOn('Group settings', 'Group settings')
     await tapOn('Everyone', 'Everyone')
     await until(state, team => team.rooms.some(entry => entry.id === room.id && entry.mode === 'everyone'), 'the group answered by everyone')

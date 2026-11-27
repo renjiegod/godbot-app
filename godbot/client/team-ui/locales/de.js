@@ -774,6 +774,8 @@ export const DE = {
   'Clear completed': 'Erledigte löschen',
   'Rename group': 'Gruppenchat umbenennen',
   'Copy conversation ID': 'Chat-ID kopieren',
+  'Copy session ID': 'Sitzungs-ID kopieren',
+  'Session ID copied': 'Sitzungs-ID kopiert',
   'Hide from sidebar': 'In Seitenleiste ausblenden',
   '{name} actions': 'Aktionen für {name}',
   // The DSH Agent's own row and Session list. "DSH Agent" is a product name and

@@ -97,6 +97,13 @@ export function DotsIcon({ size = 20, color }: IconProps) {
   return h(Svg, { width: size, height: size, viewBox: '0 0 20 20', fill: 'none', stroke: use(color, p.ink2), strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round' },
     h(Path, { d: 'M5 10h.01M10 10h.01M15 10h.01' }))
 }
+// Two overlapping sheets, as on the desktop (team-ui/icons.js CopyIcon).
+export function CopyIcon({ size = 16, color }: IconProps) {
+  const { p } = useTheme()
+  return h(Svg, { width: size, height: size, viewBox: '0 0 20 20', fill: 'none', stroke: use(color, p.ink3), strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round' },
+    h(Path, { d: 'M8.5 7h6A1.5 1.5 0 0 1 16 8.5v6a1.5 1.5 0 0 1-1.5 1.5h-6A1.5 1.5 0 0 1 7 14.5v-6A1.5 1.5 0 0 1 8.5 7z' }),
+    h(Path, { d: 'M4 12.5V5.5A1.5 1.5 0 0 1 5.5 4H13' }))
+}
 export function CheckIcon({ size = 15, color }: IconProps) {
   const { p } = useTheme()
   return h(Svg, { width: size, height: size, viewBox: '0 0 20 20', fill: 'none', stroke: use(color, p.accent), strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round' },
