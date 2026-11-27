@@ -56,6 +56,32 @@ export const actionNames = {
 export const phaseIcons = { todo: '○', doing: '◐', attention: '!', review: '◇', done: '✓', history: '◷' }
 export const defaultFilters = { tab: 'all', search: '', owner: '', room: '', source: '', section: '' }
 
+// A stale review can be reopened against the new evidence without losing the reviewer's draft.
+export function currentReview(form, item) {
+  if (
+    !form?.base ||
+    !item ||
+    form.base.id !== item.id ||
+    form.base.version === item.version ||
+    !['approve', 'reject'].includes(form.op) ||
+    !item.actions.includes(form.op)
+  )
+    return null
+  const child = form.child && item.children.find((c) => c.id === form.child.id && c.status === 'reported')
+  if (form.child && !child) return null
+  return { ...form, base: item, child }
+}
+
+export function activityByAttempt(events) {
+  const groups = new Map()
+  for (const event of events) {
+    const attempt = event.attempt || 0
+    if (!groups.has(attempt)) groups.set(attempt, { attempt, events: [] })
+    groups.get(attempt).events.push(event)
+  }
+  return [...groups.values()]
+}
+
 export function useWorkBoard({ call, subscribe, online = true, identity, filters, selected }) {
   const [view, setView] = useState(null),
     [item, setItem] = useState(null),
@@ -223,7 +249,7 @@ export function useWorkBoard({ call, subscribe, online = true, identity, filters
     setWriteError('')
     try {
       const result = await call('board-action', { ...input, requestId: request.id })
-      if (gen !== generation.current) return result
+      if (gen !== generation.current) return null
       pending.current = null
       await refresh()
       return result

@@ -12,6 +12,9 @@ import { DSH_DE, HOST_ERRORS_DE, DE } from './locales/de.js'
 export const NAMESPACE = 'godbot'
 
 const ZH = {
+  'Review current evidence': '查看新版证据',
+  'Evidence changed from v{old} to v{current}.': '证据已从第 {old} 版更新到第 {current} 版。',
+  'Attempt {number}': '第 {number} 次执行',
   'Title': '标题',
   'Source record': '来源记录',
   'Earlier activity': '更早的活动',

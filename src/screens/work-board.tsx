@@ -19,6 +19,8 @@ import { t } from '../ui/i18n.ts'
 import { useTheme, type as typeScale } from '../ui/tokens.ts'
 import {
   actionNames,
+  activityByAttempt,
+  currentReview,
   defaultFilters,
   markNames,
   phaseIcons,
@@ -53,7 +55,14 @@ type Item = Card & {
   eventNext?: number
   pending: (Ref & { id: string; type: string })[]
   dependencies: { id: string; title: string }[]
-  events: { kind: string; at: string | number; text: string; attempt?: number; execution?: Ref }[]
+  events: {
+    kind: string
+    at: string | number
+    text: string
+    attempt?: number
+    version?: number
+    execution?: Ref
+  }[]
 }
 type Column = { phase: string; items: Card[]; total: number; next: number[] | null }
 type Board = { columns: Column[]; counts: Record<string, number>; bots: Pair[]; rooms: Pair[]; readOnly: boolean }
@@ -122,6 +131,7 @@ function BoardContent({ route, navigation }: any) {
     [selected, setSelected] = useState<string | null>(params.id ?? null)
   const [opts, setOpts] = useState<Options | null>(null),
     [trail, setTrail] = useState(false)
+  const [expandedAttempt, setExpandedAttempt] = useState<number | null>(null)
   const [form, setForm] = useState<Form | null>(
     params.seed
       ? {
@@ -193,6 +203,7 @@ function BoardContent({ route, navigation }: any) {
     setForm(null)
     setSelected(id)
     setTrail(false)
+    setExpandedAttempt(null)
   }
   const select = (title: string, options: [string, string][], setter: (v: string) => void) =>
     setOpts({
@@ -300,6 +311,13 @@ function BoardContent({ route, navigation }: any) {
     </View>
   )
   const stale = !!form?.base && !!item && form.base.version !== item.version
+  const updated = currentReview(form, item) as Form | null
+  const freshBoard =
+    !phase &&
+    (Object.keys(defaultFilters) as (keyof typeof defaultFilters)[]).every(
+      (k) => filters[k] === defaultFilters[k],
+    ) &&
+    !board?.counts.history
   const invalid =
     !form ||
     disabled ||
@@ -316,9 +334,8 @@ function BoardContent({ route, navigation }: any) {
           left={{ label: t('Back'), onPress: () => navigation.goBack() }}
           right={{
             label: t('New work item'),
-            onPress: () => {
-              if (!disabled) start('create')
-            },
+            disabled,
+            onPress: () => start('create'),
           }}
         />
         <SectionList
@@ -380,7 +397,7 @@ function BoardContent({ route, navigation }: any) {
           renderItem={({ item: c }) => (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={c.id + ' ' + c.title + ' ' + name(markNames, c.mark)}
+              accessibilityLabel={c.id + ' ' + c.title + ' ' + owner(c.owner) + ' ' + name(markNames, c.mark)}
               onPress={() => pick(c.id)}
               style={[styles.card, { backgroundColor: p.card, borderColor: p.line }]}
             >
@@ -396,8 +413,8 @@ function BoardContent({ route, navigation }: any) {
           )}
           ListEmptyComponent={
             <View>
-              {line(t(board ? 'No matching work items' : 'Loading…'))}
-              {board
+              {line(t(board ? (freshBoard ? 'No work items yet' : 'No matching work items') : 'Loading…'))}
+              {board && !freshBoard
                 ? control(t('Clear filters'), () => {
                     setFilters({ ...defaultFilters })
                     setPhase('')
@@ -464,9 +481,19 @@ function BoardContent({ route, navigation }: any) {
                 {['approve', 'reject', 'note'].includes(form.op)
                   ? field(form.op === 'note' ? 'Message to the group' : 'Review feedback', 'text', true)
                   : null}
-                {stale
-                  ? line(t('This work item changed. Reopen the action to review the current evidence.'))
-                  : null}
+                {stale && updated ? (
+                  <>
+                    {line(
+                      t('Evidence changed from v{old} to v{current}.', {
+                        old: form.child?.evidenceRevision ?? form.base?.evidenceRevision ?? '',
+                        current: updated.child?.evidenceRevision ?? updated.base?.evidenceRevision ?? '',
+                      }),
+                    )}
+                    {control(t('Review current evidence'), () => setForm(updated), disabled)}
+                  </>
+                ) : stale ? (
+                  line(t('This work item changed. Reopen the action to review the current evidence.'))
+                ) : null}
               </>
             ) : item ? (
               <>
@@ -504,13 +531,29 @@ function BoardContent({ route, navigation }: any) {
                   ? control(t('Activity') + ' · ' + item.events.length, () => setTrail(!trail))
                   : null}
                 {trail
-                  ? item.events.map((e, i) => (
-                      <View key={i}>
-                        {line(e.kind + ' · ' + new Date(e.at).toLocaleString(), true)}
-                        {line(e.text)}
-                        {e.execution
-                          ? control(t('Open execution conversation'), () => original(e.execution))
+                  ? activityByAttempt(item.events).map((group: { attempt: number; events: Item['events'] }) => (
+                      <View key={group.attempt}>
+                        {group.attempt
+                          ? control(t('Attempt {number}', { number: group.attempt }), () =>
+                              setExpandedAttempt(expandedAttempt === group.attempt ? null : group.attempt),
+                            )
                           : null}
+                        {(!group.attempt || expandedAttempt === group.attempt) &&
+                          group.events.map((e, i) => (
+                            <View key={i}>
+                              {line(
+                                e.kind +
+                                  ' · ' +
+                                  new Date(e.at).toLocaleString() +
+                                  (e.version ? ' · v' + e.version : ''),
+                                true,
+                              )}
+                              {line(e.text)}
+                              {e.execution
+                                ? control(t('Open execution conversation'), () => original(e.execution))
+                                : null}
+                            </View>
+                          ))}
                       </View>
                     ))
                   : null}
