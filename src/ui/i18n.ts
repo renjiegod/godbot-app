@@ -13,6 +13,12 @@ const MOBILE_ZH: Record<string, string> = {
   'This comment belongs to another paired computer.': '这条评论属于另一台配对电脑。',
   '{count} tool calls': '{count} 次工具调用',
   '{count} running': '{count} 项进行中',
+  'Bot message delivery': 'Bot 消息投递',
+  'Could not read message delivery': '无法读取消息投递状态',
+  'Engine accepted': '引擎已接收',
+  'Delivery blocked': '投递受阻',
+  'Queued': '已入队',
+  'Replied': '已回复',
   // A group member's work sheet (member-work.tsx); the desktop's panel says the same.
   'Work process': '工作过程',
   'View process': '查看过程',

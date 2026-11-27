@@ -23,6 +23,7 @@ import { ArrowDownIcon } from '../ui/icons.tsx'
 import { workPhrase } from '../ui/phrases.ts'
 import { ActionRow, Dock } from './chat/dock.tsx'
 import { Composer, type Photo } from './chat/composer.tsx'
+import { BotDeliveries } from './chat/bot-deliveries.tsx'
 import { BotGoalCard } from './chat/bot-goal.tsx'
 import { Actions, Item, keysOf, PhotoViewer, PhotoViewerCtx, type ChatItem, type FileRef, type ImageRef } from './chat/items.tsx'
 import { ToolGroupCard } from './chat/tool-card.tsx'
@@ -541,6 +542,8 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
     <PhotoViewerCtx.Provider value={setPhotos}>
     <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={KEYBOARD_GAP - insets.bottom} style={[styles.screen, { backgroundColor: p.main }]}>
       {header}
+      {bot && !gone && hello?.capabilities?.includes('bot-deliveries')
+        ? <BotDeliveries key={chatKey} botId={bot.id} sessionId={sessionId} /> : null}
       {failover && <FailoverActivity row={failover} navigation={navigation} />}
       {room !== undefined && (room as { goal?: Goal }).goal ? <GoalBar goal={(room as { goal?: Goal }).goal!} p={p} /> : null}
       <View style={styles.list} onLayout={event => setViewportWidth(event.nativeEvent.layout.width)}>
