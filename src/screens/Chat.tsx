@@ -597,7 +597,7 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
       {bot !== undefined ? <ComputerCards bot={bot} p={p} /> : null}
       {running && doingBot ? <ActionRow bot={doingBot} doing={doingText} p={p} dark={dark} conversation={conversation}
         onPress={memberWork && roomWork[0] !== undefined && workAt(roomWork[0]) !== undefined ? () => openWork(roomWork[0].botId, workAt(roomWork[0]) ?? {}) : undefined} /> : null}
-      {bot && canUseGoals && (canWriteGoal || team?.botGoals?.[sessionId]) ? <BotGoalCard key={chatKey}
+      {bot && canUseGoals && (canWriteGoal || team?.botGoals?.[sessionId]) ? <BotGoalCard key={`goal:${chatKey}`}
         botId={bot.id} sessionId={sessionId} goal={team?.botGoals?.[sessionId]} canWrite={canWriteGoal}
         open={goalPanel === chatKey} onOpen={() => setGoalPanel(chatKey)} onClose={() => setGoalPanel(null)}
         refresh={() => refreshTeam?.()} call={call} p={p} /> : null}
