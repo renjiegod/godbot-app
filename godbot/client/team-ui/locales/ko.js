@@ -1824,6 +1824,8 @@ export const KO = {
   "A running session keeps using model calls in the background.": "실행 중인 세션은 백그라운드에서 모델 호출을 계속 사용합니다.",
   "Switch session": "세션 전환",
   "{count} running in the background": "세션 {count}개가 백그라운드에서 실행 중",
+  "Working in the background": "백그라운드에서 작업 중",
+  "Replies when done": "완료되면 답장합니다",
 }
 
 export const HOST_ERRORS_KO = [

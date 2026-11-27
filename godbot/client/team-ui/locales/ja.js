@@ -1789,6 +1789,8 @@ export const JA = {
   "A running session keeps using model calls in the background.": "実行中のセッションはバックグラウンドでモデル呼び出しを続けます。",
   "Switch session": "セッションを切り替え",
   "{count} running in the background": "{count} 件のセッションがバックグラウンドで実行中",
+  "Working in the background": "バックグラウンドで作業中",
+  "Replies when done": "完了したら返信します",
 }
 
 export const HOST_ERRORS_JA = [

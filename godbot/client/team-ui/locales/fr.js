@@ -1789,6 +1789,8 @@ export const FR = {
   "A running session keeps using model calls in the background.": "Une session en cours continue d’utiliser des appels au modèle en arrière-plan.",
   "Switch session": "Changer de session",
   "{count} running in the background": "{count} en cours en arrière-plan",
+  "Working in the background": "Travail en arrière-plan",
+  "Replies when done": "Répondra une fois terminé",
 }
 
 export const HOST_ERRORS_FR = [

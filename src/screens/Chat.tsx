@@ -11,7 +11,7 @@ import { connectorCanConnectOnMobile } from '../team/connectors.ts'
 import { useTeam } from '../team/context.tsx'
 import { anchoredItems } from '../../godbot/shared/work-board.js'
 import { agentNameOf, signInPlace } from '../team/local-sign-in.ts'
-import { partWork } from '../team/bot-sessions.ts'
+import { partWork, worksInBackground } from '../team/bot-sessions.ts'
 import { LocalSignIn } from './chat/local-sign-in.tsx'
 import { FailoverActivity } from './bot-failover.tsx'
 import { markSeen } from '../team/seen.ts'
@@ -298,6 +298,10 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
   const btw = ((team as { btwCards?: Record<string, { id: string; partId?: string; question?: string; answer?: string; failure?: string }[]> } | null)?.btwCards?.[bot?.id ?? ''] ?? []).filter(card => card.partId === undefined || card.partId === sessionId)
   const roomWork = room !== undefined ? (team?.work?.rooms?.[room.id] ?? []) : []
   const running = doing !== undefined || roomWork.length > 0
+  // No turn runs, but work the part started goes on by itself (a CLI's background task,
+  // a DSH subagent): the chat says so until its reply comes, as the session list marks
+  // it Running and the team list counts it (bot-sessions.ts worksInBackground).
+  const background = bot !== undefined && !running && worksInBackground(team, sessionId)
   const doingBot = bot ?? (roomWork[0] !== undefined ? team?.bots?.find(b => b.id === roomWork[0].botId) : undefined)
   const doingText = doing !== undefined ? workPhrase(activeTool ? { ...doing, tool: activeTool.name, target: activeTool.text } : doing)
     : roomWork[0] !== undefined ? `${doingBot?.name ?? ''} · ${workPhrase(roomWork[0])}` : ''
@@ -602,7 +606,8 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
       {bot?.blocked !== undefined ? <BlockedCard bot={bot} p={p} /> : null}
       {bot !== undefined ? <ComputerCards bot={bot} p={p} /> : null}
       {running && doingBot ? <ActionRow bot={doingBot} doing={doingText} p={p} dark={dark} conversation={conversation}
-        onPress={memberWork && roomWork[0] !== undefined && workAt(roomWork[0]) !== undefined ? () => openWork(roomWork[0].botId, workAt(roomWork[0]) ?? {}) : undefined} /> : null}
+        onPress={memberWork && roomWork[0] !== undefined && workAt(roomWork[0]) !== undefined ? () => openWork(roomWork[0].botId, workAt(roomWork[0]) ?? {}) : undefined} />
+        : background && bot !== undefined ? <ActionRow bot={bot} doing={t('Working in the background')} note={t('Replies when done')} p={p} dark={dark} conversation={conversation} /> : null}
       {bot && canUseGoals && (canWriteGoal || team?.botGoals?.[sessionId]) ? <BotGoalCard key={`goal:${chatKey}`}
         botId={bot.id} sessionId={sessionId} goal={team?.botGoals?.[sessionId]} canWrite={canWriteGoal}
         open={goalPanel === chatKey} onOpen={() => setGoalPanel(chatKey)} onClose={() => setGoalPanel(null)}

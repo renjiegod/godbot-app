@@ -84,10 +84,24 @@ export function elsewhere(entries: BotSession[]): { running: number; waiting: nu
 // and its desktop shows a running session it opens read-only until its turn ends.
 export const parallelSessions = (team: TeamState | null) => team?.partTitles !== undefined
 
-// The parts of a Bot's own chat going on in the background that run now.
+// Whether a part of a Bot's own chat works with no turn of its own running: work it
+// started goes on by itself (its CLI's background tasks, DSH subagents) and a reply is
+// still to come. `partsRunning` names every part that works, a turn running or not;
+// `work.turns`, from the same answer, names the parts a turn runs in. A host that sends
+// no `turns` cannot tell the two apart, and the part counts as running a turn. The
+// desktop reads it the same way (bot-sessions.js worksInBackground).
+export function worksInBackground(team: TeamState | null, sessionId: string): boolean {
+  const turns = team?.work?.turns
+  return team?.partsRunning?.[sessionId] === true && turns !== undefined && turns[sessionId] === undefined
+}
+
+// How many parts of a Bot's own chat run with no turn on screen: each one going on
+// beside the current part, and the current part itself while only its background work
+// goes on. The team list names this count; the session list marks the same parts Running.
 export function backgroundRunning(bot: Bot, team: TeamState | null): number {
   const current = currentPart(bot)
-  return (bot.openParts ?? []).filter(part => part.sessionId !== current && team?.partsRunning?.[part.sessionId] === true).length
+  const beside = (bot.openParts ?? []).filter(part => part.sessionId !== current && team?.partsRunning?.[part.sessionId] === true).length
+  return beside + (worksInBackground(team, current) ? 1 : 0)
 }
 
 // Whether the phone can list and switch a Bot's sessions. A host that keeps no parts
@@ -115,13 +129,16 @@ export function partWork(bot: Bot, sessionId: string, team: TeamState | null): W
   const running = team?.partsRunning
   if (doing === undefined || running === undefined) return doing
   const work = typeof doing === 'object' ? doing as Work : undefined
+  const others = [...(bot.openParts ?? []).map(part => part.sessionId), currentPart(bot)].filter(id => id !== sessionId)
   if (running[sessionId] === true) {
+    // Only work it started goes on here, no turn: a turn running in another part is
+    // what the Bot's entry describes, so this part shows its background work instead.
+    if (worksInBackground(team, sessionId)) return others.some(id => team?.work?.turns?.[id] !== undefined) ? undefined : doing
     // Two parts run: the Bot's entry describes one of them, named by when its turn began.
     const turn = team?.work?.turns?.[sessionId]
     return work?.since !== undefined && turn !== undefined && work.since !== turn ? {} : doing
   }
   // Group work and the move to a fresh part show here as they always did.
   if (work !== undefined && (work.roomId !== undefined || work.switching === true)) return doing
-  const others = [...(bot.openParts ?? []).map(part => part.sessionId), currentPart(bot)].filter(id => id !== sessionId)
   return others.some(id => running[id] === true) ? undefined : doing
 }

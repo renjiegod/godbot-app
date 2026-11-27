@@ -9,7 +9,7 @@ import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withRepea
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { Bot } from '../../connection.ts'
 import { useTeam } from '../../team/context.tsx'
-import { botSessions, currentPart, elsewhere, parallelSessions, sessionLabel, sessionMeta, switchable, unknownEndpoint, type BotSession } from '../../team/bot-sessions.ts'
+import { backgroundRunning, botSessions, currentPart, elsewhere, parallelSessions, sessionLabel, sessionMeta, switchable, unknownEndpoint, type BotSession } from '../../team/bot-sessions.ts'
 import { hostText, t } from '../../ui/i18n.ts'
 import { ChatsIcon, NewSessionIcon } from '../../ui/icons.tsx'
 import { CopyIdButton } from '../../ui/copy-id.tsx'
@@ -103,7 +103,10 @@ export function SessionsButton({ bot, onPress }: { bot: Bot; onPress: () => void
   const { p } = useTheme()
   const { team } = useTeam()
   const { running, waiting } = elsewhere(botSessions(bot, team))
-  const hint = [running > 0 ? t('{count} running in the background', { count: running }) : '', waiting > 0 ? t('Waiting for your answer') : ''].filter(Boolean).join(', ')
+  // The count the team list names for this Bot, the session on screen included while
+  // only its background work goes on (bot-sessions.ts backgroundRunning).
+  const background = backgroundRunning(bot, team)
+  const hint = [background > 0 ? t('{count} running in the background', { count: background }) : '', waiting > 0 ? t('Waiting for your answer') : ''].filter(Boolean).join(', ')
   return (
     <Pressable testID="chat-sessions" accessibilityRole="button" accessibilityLabel={t('Sessions')} accessibilityHint={hint || undefined}
       onPress={onPress} hitSlop={8} style={styles.button}>
