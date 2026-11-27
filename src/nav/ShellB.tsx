@@ -26,6 +26,7 @@ import { NeedsYou } from '../screens/NeedsYou.tsx'
 import { Settings } from '../screens/Settings.tsx'
 import { TeamList, type ChatTarget } from '../screens/TeamList.tsx'
 import { Automation } from '../screens/automation.tsx'
+import { WorkBoardScreen } from '../screens/work-board.tsx'
 import { BotDetails, BotEdit, NewBot, NewGroup, GroupDetails, GroupSettings, Memory, Folder, Usage, Computers, Secrets } from '../screens/manage.tsx'
 import { Providers, Connectors, Capabilities, TeamUsage, Location, Updates, About } from '../screens/settings-pages.tsx'
 import { LocalAgentUsage } from '../screens/local-agent-usage.tsx'
@@ -146,6 +147,8 @@ function DrawerContent() {
           </View>
           <ChevronRightIcon size={14} />
         </Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={t('Work board')} onPress={() => openScreen('WorkBoard')}
+          style={[styles.round, { borderColor:p.line, backgroundColor:p.card }]}><Text style={{color:p.accent,fontSize:18}}>▤</Text></Pressable>
         <Pressable accessibilityRole="button" accessibilityLabel={t('Automation')} onPress={() => openScreen('Automation')}
           style={[styles.round, { borderColor: p.line, backgroundColor: p.card }]}>
           <ClockIcon size={18} />
@@ -277,7 +280,8 @@ function ChatScreenB({ route, navigation }: any) {
   const sessionReadOnly = !parallelSessions(team) && readOnlyPart !== undefined && readOnlyPart === bot?.sessionId && partsRunning?.[readOnlyPart] === true
   return (
     <>
-      <ChatView key={`${computer?.hostDeviceId ?? ''}:${kind}:${id}`} bot={bot} room={room} header={header} onMissing={onMissing} sessionReadOnly={sessionReadOnly} />
+      <ChatView key={`${computer?.hostDeviceId ?? ''}:${kind}:${id}:${params?.boardPart ?? ''}`} bot={bot} room={room} header={header} onMissing={onMissing}
+        boardPart={params?.boardPart} boardMessage={params?.boardMessage} boardTurn={params?.boardTurn} sessionReadOnly={sessionReadOnly || !!params?.boardPart && params.boardPart !== (bot?.sessionId ?? room?.sessionId ?? id)} />
       {bot !== undefined && sessionsOpen ? <SessionSheet bot={bot} visible onClose={() => setSessionsOpen(false)}
         onOpened={(entry, readOnly) => navigation.setParams({ readOnlyPart: readOnly ? entry.id : undefined })} /> : null}
     </>
@@ -419,6 +423,7 @@ function Inner({ initial }: { initial: ChatTarget | null }) {
       <Stack.Screen name="GroupSettings" component={GroupSettings} />
       <Stack.Screen name="Memory" component={Memory} />
       <Stack.Screen name="Automation" component={Automation} />
+      <Stack.Screen name="WorkBoard" component={WorkBoardScreen} />
       <Stack.Screen name="Folder" component={Folder} />
       <Stack.Screen name="Usage" component={Usage} />
       <Stack.Screen name="BotBrowser">{({ route, navigation }: any) => <BotBrowser bot={route.params.bot} navigation={navigation} />}</Stack.Screen>

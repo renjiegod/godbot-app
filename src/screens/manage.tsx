@@ -234,6 +234,7 @@ export function BotDetails({ route, navigation }: any) {
       </View>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: insets.bottom + 24, paddingHorizontal: 18 }}>
+          <Row label={t('View Bot work')} onPress={()=>navigation.navigate('WorkBoard',{filters:{owner:bot.id}})} />
           <View style={styles.detailIdentity}>
             <Avatar bot={bot} dark={dark} size={64} ring={p.main} />
             <DetailIdentity bot={bot} writable={writable} save={save} />
@@ -880,6 +881,7 @@ export function GroupDetails({ route, navigation }: any) {
           <Text style={[typeScale.rowName, { color: p.ink, marginTop: 10, fontSize: 18, textAlign: 'center' }]}>{room.name}</Text>
           <Text style={[typeScale.caption, { color: p.ink3, marginTop: 2 }]}>{[t('{count} members', { count: members.length }), admin ? t('Admin {name}', { name: admin.name }) : t('No admin')].join(' · ')}</Text>
           <SessionIdLine id={room.sessionId ?? room.id} testID="group-session-copy" />
+          <Row label={t('Show group board')} onPress={()=>navigation.navigate('WorkBoard',{filters:{room:room.id}})} />
         </View>
         {notice
           ? <Text style={[typeScale.small, { color: p.ink2, marginTop: 14 }]} numberOfLines={5}>{notice}</Text>
@@ -1121,6 +1123,7 @@ function MemoryView({ route, navigation }: any) {
   return (
     <Screen title={name}>
       <BackRow title={t(isSection ? 'Section description and memory' : 'Memory')} onBack={() => navigation.goBack()} />
+      {section ? <Row label={t('Show section board')} onPress={()=>navigation.navigate('WorkBoard',{filters:{section:section.id}})} /> : null}
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
         {section && <Section label={t('Section description')}>
           <View style={styles.row}>

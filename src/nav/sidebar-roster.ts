@@ -4,6 +4,9 @@ export interface ChatTarget {
   kind: 'bot' | 'room'
   id: string
   readOnlyPart?: string
+  boardPart?: string
+  boardMessage?: string
+  boardTurn?: number
 }
 
 export type RosterEntry = { kind: 'bot'; item: Bot } | { kind: 'room'; item: Room }

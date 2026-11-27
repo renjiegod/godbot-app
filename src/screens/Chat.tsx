@@ -83,8 +83,11 @@ function keepScrollOffset(key: string, offset: number): void {
 // A chat read started before the chat is on screen: on launch the last chat is asked
 // for while the team state is still on its way, and the chat takes that answer.
 const reads = new Map<string, Promise<ChatPage>>()
-const readChat = (call: (endpoint: string, payload?: unknown) => Promise<unknown>, room: boolean, id: string) =>
-  (room ? call('room-chat', { roomId: id, steps: true }) : call('chat', { botId: id, steps: true, inlineTools: true, turnStatuses: true })) as Promise<ChatPage>
+const readChat = (call: (endpoint: string, payload?: unknown) => Promise<unknown>, room: boolean, id: string, partId?:string, messageId?:string) => {
+  const seq = messageId?.match(/^(?:[a-z]+:)?(\d+)$/i)?.[1]
+  const anchor = {partId,anchorSeq:seq===undefined?undefined:Number(seq)}
+  return (room ? call('room-chat', { roomId:id, steps:true,...anchor }) : call('chat', { botId:id,steps:true,inlineTools:true,turnStatuses:true,...anchor })) as Promise<ChatPage>
+}
 export function prefetchChat(call: (endpoint: string, payload?: unknown) => Promise<unknown>, computerId: string, target: { kind: 'bot' | 'room'; id: string }) {
   const key = `${computerId}:${target.kind}:${target.id}`
   if (pages.has(key) || reads.has(key)) return
@@ -115,8 +118,9 @@ const sameMessage = (item: ChatItem, sent: ChatItem) =>
 // The shared chat body for both shells: an inverted list (newest at the bottom, older
 // pages load as it scrolls up), the pending dock and the composer. `header` is the
 // shell's own (back row or pill).
-export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false }: {
+export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false, boardPart, boardMessage, boardTurn }: {
   bot?: Bot; room?: Room; header: React.ReactNode; onMissing?: () => void; sessionReadOnly?: boolean
+  boardPart?:string;boardMessage?:string;boardTurn?:number
 }) {
   const navigation = useNavigation<any>()
   const { team, call, refresh: refreshTeam, computer, hello } = useTeam()
@@ -124,8 +128,8 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
   const insets = useSafeAreaInsets()
   const id = bot?.id ?? room?.id ?? ''
   const targetKey = `${computer?.hostDeviceId ?? ''}:${room !== undefined ? 'room' : 'bot'}:${id}`
-  const activePart = bot?.sessionId
-  const chatKey = activePart === undefined ? targetKey : `${targetKey}:${activePart}`
+  const activePart = boardPart ?? bot?.sessionId
+  const chatKey = (activePart === undefined ? targetKey : `${targetKey}:${activePart}`) + (boardPart ? ':board:'+(boardMessage??boardTurn??'') : '')
   const cached = pages.get(chatKey)
   const [pageState, setPageState] = useState<ChatWindow>(() => ({
     key: chatKey,
@@ -171,9 +175,9 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
       reads.delete(targetKey)
       const prefetched = await early?.catch(() => undefined)
       if (generation.current !== gen) return
-      const next = prefetched !== undefined && (activePart === undefined || prefetched.sessionId === activePart)
+      const next = !boardPart && prefetched !== undefined && (activePart === undefined || prefetched.sessionId === activePart)
         ? prefetched
-        : await readChat(call, room !== undefined, id)
+        : await readChat(call, room !== undefined, id, boardPart, boardMessage)
       if (generation.current === gen) {
         if (activePart !== undefined && next.sessionId !== undefined && next.sessionId !== activePart) {
           refreshTeam?.()
@@ -217,7 +221,7 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
       // The latest refresh, not this closure's: the chat may have changed meanwhile.
       if (again.current) { again.current = false; void latest.current(generation.current) }
     }
-  }, [call, id, chatKey, targetKey, activePart, room !== undefined, refreshTeam])
+  }, [call, id, chatKey, targetKey, activePart, room !== undefined, refreshTeam, boardPart, boardMessage])
   const latest = useRef(refresh)
   latest.current = refresh
 
@@ -263,8 +267,8 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
     setLoadingOlder(true)
     try {
       const next = (room !== undefined
-        ? await call('room-chat', { roomId: room.id, cursor, steps: true })
-        : await call('chat', { botId: id, cursor, steps: true, inlineTools: true, turnStatuses: true })) as ChatPage
+        ? await call('room-chat', { roomId: room.id, partId:boardPart, cursor, steps: true })
+        : await call('chat', { botId: id, partId:boardPart, cursor, steps: true, inlineTools: true, turnStatuses: true })) as ChatPage
       if (generation.current !== gen) return
       if (activePart !== undefined && next.sessionId !== undefined && next.sessionId !== activePart) {
         refreshTeam?.()
@@ -305,6 +309,7 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
   const chatWidth = Math.max(0, Math.min(viewportWidth - inset * 2, conversation ? CONVERSATION_WIDTH : viewportWidth))
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
   const [menuText, setMenuText] = useState<string | null>(null)
+  const [menuItem,setMenuItem]=useState<ChatItem|null>(null)
   const [readerText, setReaderText] = useState<string | null>(null)
   const [readerTitle, setReaderTitle] = useState<string | null>(null)
   const [fileError, setFileError] = useState<string | null>(null)
@@ -523,7 +528,7 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
       <ErrorBoundary inline>
         <Item stamp={row.stamp} author={inRoom && item.botId !== undefined ? botsById.get(item.botId) : undefined} admin={inRoom && item.botId !== undefined && item.botId === admin}
           item={item} p={p} layout={layout} maxWidth={item.kind === 'bot' || item.kind === 'post' ? botMax : userMax} inRoom={inRoom} sessionId={sessionId}
-          onLongPress={setMenuText} onOpenFile={openFile} onSaveFile={saveFile} onRetry={retry} open={openSteps[row.key]} onToggle={toggleOf(row.key)}
+          onLongPress={text=>{setMenuItem(item);setMenuText(text)}} onOpenFile={openFile} onSaveFile={saveFile} onRetry={retry} open={openSteps[row.key]} onToggle={toggleOf(row.key)}
           onOpenWork={memberWork ? openWork : undefined} showWork={workRows.has(row.key)} />
       </ErrorBoundary>
     )
@@ -604,7 +609,7 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
       <Dock question={question} sessionId={sessionId} approvals={approvals} secrets={secrets} connectorRequests={connectorRequests} botName={bot?.name} onOpenConnector={connectorId => { if (connectorCanConnectOnMobile(connectorId)) navigation.navigate('Settings', { screen: 'Connectors', params: { focusId: connectorId }, initial: false }) }} btw={btw} handoff={browserHold} view={team?.views?.[sessionId]} call={call} p={p} expanded={expandedKey} onExpand={setExpandedKey} />
       {fileError ? <Text style={[type.small, { color: p.danger, textAlign: 'center', marginBottom: 4 }]} accessibilityRole="alert">{fileError}</Text> : null}
       {page !== null && loadError !== null ? <Text style={[type.small, { color: p.danger, textAlign: 'center', marginBottom: 4, marginHorizontal: 16 }]} accessibilityRole="alert">{loadError}</Text> : null}
-      {sessionReadOnly || team?.readOnly ? (
+      {boardPart && sessionReadOnly ? <Text style={{padding:12,color:p.ink2}}>{t('Read only')}</Text> : sessionReadOnly || team?.readOnly ? (
         <View style={{ marginHorizontal: 12, marginBottom: Math.max(insets.bottom, 10), padding: 10, gap: 8, borderRadius: 12, backgroundColor: p.card, flexDirection: 'row', alignItems: 'center' }}>
           <Text accessibilityRole="alert" style={[type.caption, { color: p.ink2, flex: 1 }]}>
             {team?.readOnly || t('This session is still running. Wait for it to finish, or stop it.')}
@@ -617,6 +622,10 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
         </View>
       ) : <Composer key={chatKey} name={bot?.name ?? room?.name ?? ''} conversation={conversation} running={running} canStop={canStop} canAttach={hello?.capabilities?.includes('send-images') === true} onSend={send} onStop={stop} p={p} />}
       <Actions visible={menuText !== null} text={menuText ?? ''} p={p}
+        onWork={hello?.capabilities.includes('work-board-v1') && !team?.readOnly && menuItem && ['user','bot','post'].includes(menuItem.kind) && (menuItem.seq??menuItem.id)!=null ? ()=>{
+          const origin={botId:bot?.id,roomId:room?.id,sessionId:menuItem.sessionId??sessionId,messageId:String(menuItem.seq??menuItem.id),turnId:menuItem.turn}
+          navigation.navigate('WorkBoard',{seed:{title:(menuText??'').slice(0,160),origin}});setMenuText(null)
+        }:undefined}
         onClose={() => setMenuText(null)}
         onSelect={() => { setReaderTitle(null); setReaderText(menuText); setMenuText(null) }} />
       <Modal visible={readerText !== null} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setReaderText(null)}>

@@ -26,6 +26,7 @@ export const CLIENT_FILES = [
   ['src/client/team-ui/i18n.js', 'client/team-ui/i18n.js'],
 ]
 export const SHARED_FILES = [
+  ['src/host/team-runtime/shared/work-board.js', 'shared/work-board.js'],
   ['src/host/team-runtime/shared/im-platforms.js', 'shared/im-platforms.js'],
   ['src/host/team-runtime/shared/file-chunks.js', 'shared/file-chunks.js'],
 ]

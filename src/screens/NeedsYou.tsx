@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { useNavigation } from '@react-navigation/native'
 import { SectionList, StyleSheet, Text, View, Pressable } from 'react-native'
 import { useTeam } from '../team/context.tsx'
 import { pendingItemsOf } from '../nav/pending.ts'
@@ -13,7 +14,8 @@ interface Section { title: string; mark: string; data: PendingRow[] }
 // Pending things grouped the way the desktop groups them: questions, approvals,
 // secret requests and cards each get a section with its own badge.
 export function NeedsYou({ onOpen }: { onOpen: (target: ChatTarget) => void }) {
-  const { team, refresh } = useTeam()
+  const { team, refresh, hello } = useTeam()
+  const navigation = useNavigation<any>()
   const { p, dark } = useTheme()
   useEffect(() => { refresh?.() }, [refresh])
   const bots = team?.bots ?? []
@@ -65,6 +67,7 @@ export function NeedsYou({ onOpen }: { onOpen: (target: ChatTarget) => void }) {
     <SectionList
       style={{ flex: 1, backgroundColor: p.main }}
       sections={sections}
+      ListHeaderComponent={hello?.capabilities.includes('work-board-v1') ? <Pressable accessibilityRole="button" style={{padding:15}} onPress={()=>navigation.navigate('WorkBoard',{filters:{tab:'mine'}})}><Text style={{color:p.accent}}>{t('Needs my action')} · {t('Work board')}</Text></Pressable> : undefined}
       keyExtractor={row => row.key}
       renderSectionHeader={({ section }) => (
         <View style={[styles.header, { backgroundColor: p.main }]}>

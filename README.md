@@ -33,6 +33,7 @@ Open a Bot and send a message to confirm your link. Use **Settings → Computers
 
 - **Stay in the conversation.** Read replies, send messages or attachments, and follow individual Bots or group chats. In a group, open a member's work to watch its tool calls as they run, and stop it.
 - **Respond to approvals.** Open **Needs you** for questions and approval requests from your team.
+- **Track and review work.** Open **Work board** in the team drawer or long-press a message to create a draft. Assign it to a Bot, request changes, and accept the current evidence. Your paired computer saves the same item for Web and Android.
 - **Manage the team.** Edit Bots and groups, review memory and schedules, and inspect team usage and settings.
 
 ## Remote computers
