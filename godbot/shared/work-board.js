@@ -82,6 +82,15 @@ export function activityByAttempt(events) {
   return [...groups.values()]
 }
 
+export function anchoredItems(items, messageId, turnId) {
+  if (messageId != null) {
+    const key = String(messageId)
+    const seq = /^(?:[a-z]+:)?(\d+)$/i.exec(key)?.[1]
+    return items.filter((i) => (i.id != null && String(i.id) === key) || (seq != null && String(i.seq) === seq))
+  }
+  return turnId == null ? [] : items.filter((i) => i.turn === turnId)
+}
+
 export function useWorkBoard({ call, subscribe, online = true, identity, filters, selected }) {
   const [view, setView] = useState(null),
     [item, setItem] = useState(null),

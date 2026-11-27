@@ -9,6 +9,7 @@ import type { Approval, Bot, Question, Room } from '../connection.ts'
 import { createChatCache, joinChatItems } from '../team/chat-cache.ts'
 import { connectorCanConnectOnMobile } from '../team/connectors.ts'
 import { useTeam } from '../team/context.tsx'
+import { anchoredItems } from '../../godbot/shared/work-board.js'
 import { agentNameOf, signInPlace } from '../team/local-sign-in.ts'
 import { partWork } from '../team/bot-sessions.ts'
 import { LocalSignIn } from './chat/local-sign-in.tsx'
@@ -118,9 +119,9 @@ const sameMessage = (item: ChatItem, sent: ChatItem) =>
 // The shared chat body for both shells: an inverted list (newest at the bottom, older
 // pages load as it scrolls up), the pending dock and the composer. `header` is the
 // shell's own (back row or pill).
-export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false, boardPart, boardMessage, boardTurn }: {
+export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false, boardPart, boardMessage, boardTurn, boardReference }: {
   bot?: Bot; room?: Room; header: React.ReactNode; onMissing?: () => void; sessionReadOnly?: boolean
-  boardPart?:string;boardMessage?:string;boardTurn?:number
+  boardPart?:string;boardMessage?:string;boardTurn?:number;boardReference?:boolean
 }) {
   const navigation = useNavigation<any>()
   const { team, call, refresh: refreshTeam, computer, hello } = useTeam()
@@ -609,6 +610,9 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
       <Dock question={question} sessionId={sessionId} approvals={approvals} secrets={secrets} connectorRequests={connectorRequests} botName={bot?.name} onOpenConnector={connectorId => { if (connectorCanConnectOnMobile(connectorId)) navigation.navigate('Settings', { screen: 'Connectors', params: { focusId: connectorId }, initial: false }) }} btw={btw} handoff={browserHold} view={team?.views?.[sessionId]} call={call} p={p} expanded={expandedKey} onExpand={setExpandedKey} />
       {fileError ? <Text style={[type.small, { color: p.danger, textAlign: 'center', marginBottom: 4 }]} accessibilityRole="alert">{fileError}</Text> : null}
       {page !== null && loadError !== null ? <Text style={[type.small, { color: p.danger, textAlign: 'center', marginBottom: 4, marginHorizontal: 16 }]} accessibilityRole="alert">{loadError}</Text> : null}
+      {boardReference && page && !anchoredItems(items, boardMessage, boardTurn).length
+        ? <Text accessibilityRole="text" style={{paddingHorizontal:12,color:p.ink2}}>{t(boardMessage == null && boardTurn == null
+          ? 'This record identifies the conversation only.' : 'The linked message is unavailable.')}</Text> : null}
       {boardPart && sessionReadOnly ? <Text style={{padding:12,color:p.ink2}}>{t('Read only')}</Text> : sessionReadOnly || team?.readOnly ? (
         <View style={{ marginHorizontal: 12, marginBottom: Math.max(insets.bottom, 10), padding: 10, gap: 8, borderRadius: 12, backgroundColor: p.card, flexDirection: 'row', alignItems: 'center' }}>
           <Text accessibilityRole="alert" style={[type.caption, { color: p.ink2, flex: 1 }]}>

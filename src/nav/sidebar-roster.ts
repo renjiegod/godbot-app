@@ -5,6 +5,7 @@ export interface ChatTarget {
   id: string
   readOnlyPart?: string
   boardPart?: string
+  boardReference?: boolean
   boardMessage?: string
   boardTurn?: number
 }

@@ -279,6 +279,7 @@ function BoardContent({ route, navigation }: any) {
       boardPart: ref.sessionId,
       boardMessage: ref.messageId,
       boardTurn: ref.turnId,
+      boardReference: true,
     })
   }
   const sections = useMemo(

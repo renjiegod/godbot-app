@@ -13,6 +13,8 @@ export const NAMESPACE = 'godbot'
 
 const ZH = {
   'Review current evidence': '查看新版证据',
+  'This record identifies the conversation only.': '此记录只保留了会话，缺少原消息定位。',
+  'The linked message is unavailable.': '无法定位原消息或回合，可打开对应会话查看。',
   'Evidence changed from v{old} to v{current}.': '证据已从第 {old} 版更新到第 {current} 版。',
   'Attempt {number}': '第 {number} 次执行',
   'Title': '标题',
