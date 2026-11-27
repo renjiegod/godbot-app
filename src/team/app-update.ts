@@ -28,8 +28,8 @@ function resolveUrl(url: string, base: string): string {
   const origin = /^(https?:\/\/[^/?#]+)/i.exec(base)?.[1]
   if (origin === undefined) throw new Error('The update address is invalid.')
   if (url.startsWith('/')) return `${origin}${url}`
-  const dir = base.replace(/[?#].*$/, '').replace(/[^/]*$/, '')
-  return `${dir}${url}`
+  // The relay resolves bare filenames against /download/, including on /download/latest.
+  return `${origin}/download/${url.replace(/^\.\//, '')}`
 }
 
 /** Checks a downloaded manifest; throws a person-readable error when it is not one. */
