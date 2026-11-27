@@ -6,6 +6,18 @@ export interface SessionStats {
   contextPressure?: { projectedTokens?: number; pressureTokens?: number; contextWindow?: number }
 }
 
+// The turns of a Bot's chat as the team state shows them: the start of the one that runs
+// now (work.turns), gone once it ends. A watch counts the turns that closed while it
+// looked, which is when the run stats move, so a read follows each one and not every
+// start, background task, or redraw. A change of what it watches starts the count again.
+export interface TurnWatch { scope: string; since: number | undefined; closed: number }
+
+export function watchTurns(watch: TurnWatch | null, scope: string, since: number | undefined): TurnWatch {
+  if (watch === null || watch.scope !== scope) return { scope, since, closed: 0 }
+  if (watch.since === since) return watch
+  return { scope, since, closed: watch.closed + (watch.since === undefined ? 0 : 1) }
+}
+
 export function sessionUsage(stats: SessionStats | null) {
   const usage = stats?.tokenUsage
   const cacheRead = usage?.cacheReadTokens ?? 0

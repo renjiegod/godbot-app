@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { Bot, TeamState } from '../connection.ts'
-import { botPrivacyBlock, modelsForBot, sessionFigures, sessionUsage } from './bot-details.ts'
+import { botPrivacyBlock, modelsForBot, sessionFigures, sessionUsage, watchTurns } from './bot-details.ts'
 
 const bot: Bot = {
   id: 'bot-1',
@@ -44,4 +44,20 @@ test('privacy eligibility matches host constraints, including a legacy primary I
   assert.equal(botPrivacyBlock(bot, null), 'Choose a working folder of its own first.')
   assert.equal(botPrivacyBlock({ ...bot, workDir: '/bots/one' }, null), undefined)
   assert.equal(botPrivacyBlock({ ...bot, private: true }, team), undefined)
+})
+
+test('the run stats follow each closed turn, not its start or a redraw', () => {
+  let watch = watchTurns(null, 'host:bot-1:part-4', undefined)
+  assert.equal(watch.closed, 0)
+  // A redraw with nothing new keeps the watch as it is.
+  assert.equal(watchTurns(watch, 'host:bot-1:part-4', undefined), watch)
+  watch = watchTurns(watch, 'host:bot-1:part-4', 1_000)
+  assert.equal(watch.closed, 0, 'a turn starting moves nothing')
+  watch = watchTurns(watch, 'host:bot-1:part-4', undefined)
+  assert.equal(watch.closed, 1, 'the turn closed')
+  // A turn that starts right after the last one ended closes that one.
+  watch = watchTurns(watchTurns(watch, 'host:bot-1:part-4', 2_000), 'host:bot-1:part-4', 3_000)
+  assert.equal(watch.closed, 2)
+  // Another Bot, part or computer starts over: its first read is the one that opens it.
+  assert.deepEqual(watchTurns(watch, 'host:bot-1:part-5', 3_000), { scope: 'host:bot-1:part-5', since: 3_000, closed: 0 })
 })

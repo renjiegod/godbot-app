@@ -2,7 +2,7 @@
 // Bot and group management screens, mirroring the desktop details drawer and
 // settings forms: Bot details, Edit Bot, Create Bot, group settings, and the
 // "new" sheet. Every write goes through the same endpoints the desktop calls.
-import { Children, Fragment, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { Children, Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useIsFocused } from '@react-navigation/native'
 import { Alert, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -15,7 +15,7 @@ import * as ImagePicker from 'expo-image-picker'
 import { DEMO, useTeam } from '../team/context.tsx'
 import { legacyAutomationView, type AutomationView } from '../team/automation.ts'
 import { memorySummaryText } from '../team/memory.ts'
-import { botPrivacyBlock, isLocalModel, modelRoute, sessionFigures, sessionUsage, type SessionStats } from '../team/bot-details.ts'
+import { botPrivacyBlock, isLocalModel, modelRoute, sessionFigures, sessionUsage, watchTurns, type SessionStats, type TurnWatch } from '../team/bot-details.ts'
 import { botSessions, currentPart, sessionLabel } from '../team/bot-sessions.ts'
 import { SessionRow, useSessionsAvailable, useSessionSwitch } from './chat/sessions.tsx'
 import { SessionIdLine } from '../ui/copy-id.tsx'
@@ -496,10 +496,14 @@ function MemorySummary({ bot, onOpen }: { bot: Bot; onOpen: () => void }) {
 
 const formatTokens = (count: number) => (count >= 1e6 ? `${(count / 1e6).toFixed(1)}M` : count >= 1e3 ? `${(count / 1e3).toFixed(1)}K` : String(count))
 
+// The run stats of the Bot's current chat: read when it shows, and again each time a turn
+// there closes (desktop details-drawer.js RunStats does the same).
 function useDetailStats(bot?: Bot) {
   const { call, team, computer, hello, online } = useTeam()
   const scope = `${computer?.hostDeviceId ?? ''}:${hello?.boot ?? ''}:${bot?.id ?? ''}:${bot?.sessionId ?? ''}`
-  const running = team?.partsRunning?.[bot?.sessionId ?? ''] === true
+  const turns = useRef<TurnWatch | null>(null)
+  turns.current = watchTurns(turns.current, scope, team?.work?.turns?.[bot?.sessionId ?? ''])
+  const closed = turns.current.closed
   const [read, setRead] = useState<{ scope: string; stats: SessionStats | null } | null>(null)
   useEffect(() => {
     if (!online || bot === undefined) return
@@ -508,7 +512,7 @@ function useDetailStats(bot?: Bot) {
       if (live) setRead({ scope, stats: value as SessionStats | null })
     }).catch(() => {})
     return () => { live = false }
-  }, [call, scope, running, online])
+  }, [call, scope, closed, online])
   return read?.scope === scope ? read.stats : null
 }
 
