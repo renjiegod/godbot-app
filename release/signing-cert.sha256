@@ -1,0 +1,6 @@
+# SHA-256 fingerprint of the certificate that signs every published Godbot APK
+# (the release key; read from the published 0.1.22 APK). Android updates an
+# installed app in place only with an APK signed by the same key, so a release
+# build signed with anything else must never ship. scripts/release-apk.mjs checks
+# every release build against this line.
+9C:77:63:B0:7C:38:B2:CE:21:31:CF:54:7B:C1:01:76:1D:54:B3:6A:EF:7C:69:FB:0A:5C:BB:4A:63:09:61:98

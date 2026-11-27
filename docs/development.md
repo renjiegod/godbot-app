@@ -22,7 +22,7 @@ npx expo prebuild --platform android --clean
 (cd android && ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a)
 ```
 
-The APK is written to `android/app/build/outputs/apk/release/app-release.apk`. To serve it from the relay, also put `gzip -9 -k -n <apk>` next to it: the relay sends the `.gz` copy to clients that accept gzip, and they unpack it to the same APK. Provide `GODBOT_ANDROID_KEYSTORE`, `GODBOT_ANDROID_KEYSTORE_PASSWORD`, `GODBOT_ANDROID_KEY_ALIAS`, and `GODBOT_ANDROID_KEY_PASSWORD` to use a release key. Local builds default to debug signing. Use the same release key for each distributed APK so Android can install updates in place.
+The APK is written to `android/app/build/outputs/apk/release/app-release.apk`. Provide `GODBOT_ANDROID_KEYSTORE`, `GODBOT_ANDROID_KEYSTORE_PASSWORD`, `GODBOT_ANDROID_KEY_ALIAS`, and `GODBOT_ANDROID_KEY_PASSWORD` to use a release key. Local builds default to debug signing and are for testing only: Android installs an update in place only when it is signed with the same key, so every distributed APK is signed with the release certificate pinned in [`release/signing-cert.sha256`](../release/signing-cert.sha256). `node scripts/release-apk.mjs check-signature <apk>` checks an APK against it (needs `ANDROID_HOME` and Java).
 
 Set `EXPO_PUBLIC_GODBOT_DEMO=1` at build time to open the built-in team without pairing. After a demo build, unset the flag and force Metro to regenerate the release bundle with `./gradlew :app:createBundleReleaseJsAndAssets --rerun assembleRelease` from `android/`.
 
@@ -30,9 +30,17 @@ For encrypted Firebase push, set `GODBOT_GOOGLE_SERVICES_JSON` to your project's
 
 ### Tests and CI
 
-The [CI workflow](../.github/workflows/ci.yml) runs type checking and tests, checks the shared files against their recorded revision, and builds the APK and checksum as the `godbot-android` artifact. It can sign with a release key using the four signing secrets listed in the workflow, including `GODBOT_ANDROID_KEYSTORE_BASE64` for the keystore.
+The [CI workflow](../.github/workflows/ci.yml) runs type checking and tests, checks the shared files against their recorded revision, and builds the APK and checksum. Builds of `main` must be signed with the release key from the four signing secrets listed in the workflow (including `GODBOT_ANDROID_KEYSTORE_BASE64` for the keystore): without them, or with an APK that is not signed by the pinned certificate, the build fails instead of falling back to the debug key, and shared files synced from uncommitted desktop changes fail it too. Pull requests build a debug-signed APK, uploaded as `godbot-android-debug-signed`. CI artifacts are not releases.
 
-The GitHub release tag follows the version in `package.json`, for example `v0.1.1`. Publish the release-signed APK with a checksum calculated after signing.
+### Releases
+
+A release APK is built once and the published APK is the one that was verified:
+
+1. Set `version` in `package.json` (the versionCode follows from it, see `app.config.js`), sync `godbot/` from a committed desktop revision, and merge to `main`.
+2. Run **Release Godbot for Android** ([release.yml](../.github/workflows/release.yml)) from the Actions tab with the commit's full SHA. It builds the release-signed APK and stages it on a draft release with its checksum, the gzip copy the relay serves, and `app-metadata.json` (version, versionCode, signing certificate, SHA-256). It refuses an APK that is not signed with the pinned certificate, whose versionCode does not come after the last release, or whose last release was signed with another key.
+3. The release tool (godbot-server `release/`) verifies the draft APK — its digest, the certificate, the versionCode against GitHub and the relay, an upgrade install over the last public APK on an emulator — and attaches `verification.json` to the draft.
+4. Push the tag that names the version, for example `v0.1.1`, on the candidate's commit. The `promote` job publishes the draft only when the tag, the APK bytes, the `.sha256`, the gzip copy, `app-metadata.json` and `verification.json` agree; it never rebuilds, and a published release is never changed.
+5. The relay's `/app/latest.json` is switched to the published APK last (`godbot-relay app publish` on the relay machine), and read back from `/app/latest.json` and `/download/latest`.
 
 The [end-to-end scripts](../e2e/) require `adb` and an Android emulator. Pairing tests accept `GODBOT_E2E_APK` to override the APK path.
 

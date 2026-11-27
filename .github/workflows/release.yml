@@ -1,0 +1,165 @@
+name: Release Godbot for Android
+# A release APK is built once, from an exact commit on main, signed with the
+# release key and staged on a draft release with app-metadata.json (version,
+# versionCode, signing certificate, SHA-256) and the gzip copy the relay serves.
+# The release tool (godbot-server release/) verifies that APK — the pinned
+# certificate, a versionCode after the last release, an upgrade install over
+# the last public APK — and attaches verification.json. Pushing the version tag
+# then publishes the draft only when the tag, the APK bytes and both records
+# agree; nothing is rebuilt and a published release is never changed. The
+# relay's /app/latest.json is switched to the published APK afterwards
+# (godbot-relay app publish), never before.
+# The release tool finds a candidate run again by the commit in its name.
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('Godbot for Android release candidate {0}', inputs.ref) || format('Publish Godbot for Android {0}', github.ref_name) }}
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Full 40-character commit SHA on main to build a release candidate from
+        required: true
+  push:
+    tags: ['v*.*.*']
+permissions:
+  contents: write
+concurrency:
+  group: godbot-app-release
+  cancel-in-progress: false
+jobs:
+  candidate:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      REF: ${{ github.event.inputs.ref }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check the requested commit
+        shell: bash
+        run: |
+          if ! [[ "$REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::ref must be a full 40-character commit SHA, not '$REF'"
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Check the commit is on main and its version is unpublished
+        shell: bash
+        run: |
+          git fetch --quiet origin main
+          if ! git merge-base --is-ancestor "$REF" origin/main; then
+            echo "::error::$REF is not on main"
+            exit 1
+          fi
+          version=$(node -p "require('./package.json').version")
+          tag="v$version"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+          if tagged=$(git rev-parse -q --verify "refs/tags/$tag^{commit}"); then
+            if [ "$tagged" != "$REF" ]; then
+              echo "::error::$tag already points at $tagged"
+              exit 1
+            fi
+          fi
+          published=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq "[.[] | select(.tag_name == \"$tag\" and (.draft | not))] | length")
+          if [ "$published" != "0" ]; then
+            echo "::error::$tag is already published; a published release is never replaced"
+            exit 1
+          fi
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - name: Check the synced Godbot files come from a dsh-godbot commit
+        run: |
+          if [ "$(node -p "require('./godbot/SOURCE.json').godbot.dirty === false")" != "true" ]; then
+            echo "::error::godbot/ was synced from uncommitted dsh-godbot changes; a release needs a committed source"
+            exit 1
+          fi
+          commit=$(node -p "require('./godbot/SOURCE.json').godbot.commit")
+          git clone --quiet --filter=blob:none https://github.com/renjiegod/dsh-godbot.git "$RUNNER_TEMP/dsh-godbot"
+          git -C "$RUNNER_TEMP/dsh-godbot" checkout --quiet --detach "$commit"
+          GODBOT_SRC="$RUNNER_TEMP/dsh-godbot" npm run check:godbot
+      - run: npx expo prebuild --platform android --no-install
+      - name: Release signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.GODBOT_ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.GODBOT_ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.GODBOT_ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.GODBOT_ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ]; then
+            echo "::error::The release signing secrets are missing; a release is never signed with the debug key"
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/godbot-release.jks"
+          {
+            echo "GODBOT_ANDROID_KEYSTORE=$RUNNER_TEMP/godbot-release.jks"
+            echo "GODBOT_ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "GODBOT_ANDROID_KEY_ALIAS=$KEY_ALIAS"
+            echo "GODBOT_ANDROID_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+      - name: Build the release APK
+        working-directory: android
+        run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a
+      - name: Describe the candidate
+        shell: bash
+        run: |
+          mkdir -p dist
+          apk="dist/godbot-$VERSION.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "$apk"
+          node scripts/release-apk.mjs describe "$apk" --commit "$REF" --repo "$GITHUB_REPOSITORY" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > dist/app-metadata.json
+          cat dist/app-metadata.json
+          (cd dist && sha256sum "godbot-$VERSION.apk" > "godbot-$VERSION.apk.sha256")
+          # The relay serves this copy with Content-Encoding: gzip to clients that accept it.
+          gzip -9 -k -n "$apk"
+      - name: Stage the candidate on a draft release
+        shell: bash
+        run: |
+          for id in $(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.tag_name == \"$TAG\" and .draft) | .id"); do
+            echo "Replacing the earlier draft $id for $TAG"
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"
+          done
+          flags=()
+          case "$VERSION" in *-*) flags+=(--prerelease) ;; esac
+          gh release create "$TAG" "dist/godbot-$VERSION.apk" "dist/godbot-$VERSION.apk.sha256" "dist/godbot-$VERSION.apk.gz" dist/app-metadata.json \
+            --draft --target "$REF" --title "Godbot for Android $VERSION" --generate-notes "${flags[@]}"
+          {
+            echo "### Godbot for Android $VERSION candidate"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Commit | \`$REF\` |"
+            echo "| APK | \`$(jq -r .apk.sha256 dist/app-metadata.json)\` |"
+            echo "| versionCode | $(jq -r .versionCode dist/app-metadata.json) |"
+            echo "| Certificate | \`$(jq -r .certSha256 dist/app-metadata.json)\` |"
+            echo
+            echo "Staged on a draft release. Verify it with the release tool, attach verification.json, then push $TAG to publish."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  promote:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Publish the verified candidate
+        run: node scripts/release-apk.mjs promote --repo "$GITHUB_REPOSITORY" --tag "$TAG"

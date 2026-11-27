@@ -23,13 +23,21 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       # godbot/ is a copy of files from dsh-godbot at the commit SOURCE.json records.
+      # A pull request may carry a copy of uncommitted changes while it is worked on;
+      # main may not, since every APK built from main can become a release.
       - name: Check the synced Godbot files
+        env:
+          EVENT: ${{ github.event_name }}
         run: |
           dirty=$(node -p "require('./godbot/SOURCE.json').godbot.dirty === true")
           commit=$(node -p "require('./godbot/SOURCE.json').godbot.commit")
           if [ "$dirty" = "true" ]; then
-            echo "::warning::godbot/ was synced from uncommitted dsh-godbot changes; run npm run sync:godbot from a committed checkout"
-            exit 0
+            if [ "$EVENT" = "pull_request" ]; then
+              echo "::warning::godbot/ was synced from uncommitted dsh-godbot changes; run npm run sync:godbot from a committed checkout before merging"
+              exit 0
+            fi
+            echo "::error::godbot/ was synced from uncommitted dsh-godbot changes; run npm run sync:godbot from a committed checkout"
+            exit 1
           fi
           git clone --quiet --filter=blob:none https://github.com/renjiegod/dsh-godbot.git "$RUNNER_TEMP/dsh-godbot"
           git -C "$RUNNER_TEMP/dsh-godbot" checkout --quiet --detach "$commit"
@@ -51,7 +59,9 @@ jobs:
           java-version: 17
       - run: npm ci
       - run: npx expo prebuild --platform android --no-install
-      # Signed with the release key when the secrets exist; otherwise with the debug key.
+      # Builds of main are signed with the release key and must have it: a debug-signed
+      # APK can never update installed copies. Pull requests get no secrets; their APK
+      # is debug-signed and uploaded under a name that says so.
       - name: Release signing key
         if: github.event_name != 'pull_request'
         env:
@@ -60,9 +70,9 @@ jobs:
           KEY_ALIAS: ${{ secrets.GODBOT_ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.GODBOT_ANDROID_KEY_PASSWORD }}
         run: |
-          if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::notice::No signing secrets; the APK is signed with the debug key"
-            exit 0
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ]; then
+            echo "::error::The release signing secrets are missing; refusing to build a release APK with the debug key"
+            exit 1
           fi
           echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/godbot-release.jks"
           {
@@ -74,6 +84,9 @@ jobs:
       - name: Build the release APK
         working-directory: android
         run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a
+      - name: Check the APK is signed with the release certificate
+        if: github.event_name != 'pull_request'
+        run: node scripts/release-apk.mjs check-signature android/app/build/outputs/apk/release/app-release.apk
       - name: Checksum
         run: |
           version=$(node -p "require('./package.json').version")
@@ -82,8 +95,9 @@ jobs:
           (cd dist && sha256sum "godbot-$version.apk" > "godbot-$version.apk.sha256")
           # The relay serves this copy with Content-Encoding: gzip to clients that accept it.
           gzip -9 -k -n "dist/godbot-$version.apk"
+      # A CI build, not a release: releases come from release.yml, built once and promoted.
       - uses: actions/upload-artifact@v4
         with:
-          name: godbot-android
+          name: ${{ github.event_name == 'pull_request' && 'godbot-android-debug-signed' || 'godbot-android' }}
           path: dist/
           retention-days: 14
