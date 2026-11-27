@@ -134,9 +134,8 @@ export interface BotGoal {
   sessionId?: string
   status: 'active' | 'paused' | 'blocked' | 'completed' | 'stopped'
   activity: 'queued' | 'running' | 'waiting' | null
+  // Turns this goal has started. A goal has no turn or time budget.
   turns: number
-  maxTurns: number
-  maxMinutes: number
   revision: number
   reason?: string
   checkpoint?: { summary: string; evidence?: string; next?: string }

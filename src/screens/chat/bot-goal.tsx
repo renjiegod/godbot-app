@@ -2,21 +2,22 @@ import { useState } from 'react'
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { BotGoal } from '../../connection.ts'
-import { t } from '../../ui/i18n.ts'
+import { hostText, t } from '../../ui/i18n.ts'
 import { type as textStyle, type Palette } from '../../ui/tokens.ts'
 
-type Draft = Pick<BotGoal, 'objective' | 'acceptance'> & { turns: string; minutes: string; revision: number | null }
+type Draft = Pick<BotGoal, 'objective' | 'acceptance'> & { revision: number | null }
 
+// The same words as the goal chip in Godbot's Web composer.
 function statusOf(goal: BotGoal | undefined) {
   if (goal === undefined) return ''
   switch (goal.status) {
-    case 'completed': return t('Completed')
-    case 'stopped': return goal.activity ? t('Stopping') : t('Stopped')
+    case 'completed': return t('Goal reached')
+    case 'stopped': return goal.activity ? t('Stopping') : t('Goal ended')
     case 'paused': return goal.activity ? t('Pausing') : t('Paused')
-    case 'blocked': return t('Needs review')
+    case 'blocked': return t('Needs you')
     default:
-      if (goal.activity === 'waiting') return t('Waiting for input')
-      return goal.activity === 'running' ? t('Running') : t('Queued')
+      if (goal.activity === 'waiting') return t('Waiting for you')
+      return goal.activity === 'running' ? t('Working') : t('Starting soon')
   }
 }
 
@@ -35,7 +36,6 @@ export function BotGoalCard({ botId, sessionId, goal, canWrite, open, onOpen, on
   const canEdit = goal !== undefined && !['completed', 'stopped'].includes(goal.status)
   const edit = (fresh: boolean) => setDraft({
     objective: fresh ? '' : goal?.objective ?? '', acceptance: fresh ? '' : goal?.acceptance ?? '',
-    turns: String(fresh ? 8 : goal?.maxTurns ?? 8), minutes: String(fresh ? 30 : goal?.maxMinutes ?? 30),
     revision: goal?.revision ?? null,
   })
   function close() {
@@ -50,14 +50,13 @@ export function BotGoalCard({ botId, sessionId, goal, canWrite, open, onOpen, on
         botId, sessionId, action, goalId: goal?.id, revision: goal?.revision ?? null,
         requestId: Date.now() + '-' + Math.random(),
         ...(draft && (action === 'start' || action === 'edit') ? {
-          objective: draft.objective, acceptance: draft.acceptance, maxTurns: Number(draft.turns),
-          maxMinutes: Number(draft.minutes), revision: draft.revision,
+          objective: draft.objective, acceptance: draft.acceptance, revision: draft.revision,
         } : {}),
       })
       refresh()
       if (action === 'start' || action === 'edit') setDraft(null)
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure))
+      setError(hostText(failure instanceof Error ? failure.message : String(failure)))
       refresh()
     } finally { setPending(false) }
   }
@@ -86,21 +85,10 @@ export function BotGoalCard({ botId, sessionId, goal, canWrite, open, onOpen, on
           <Text style={[textStyle.small, { color: p.ink2 }]}>{t('Objective')}</Text>
           <TextInput accessibilityLabel={t('Objective')} multiline maxLength={4000} value={draft.objective}
             onChangeText={objective => setDraft({ ...draft, objective })} style={[styles.field, { color: p.ink, borderColor: p.line }]} />
-          <Text style={[textStyle.small, { color: p.ink2 }]}>{t('Done when')}</Text>
-          <TextInput accessibilityLabel={t('Done when')} multiline maxLength={2000} value={draft.acceptance}
+          <Text style={[textStyle.small, { color: p.ink2 }]}>{t('Finished when (optional)')}</Text>
+          <TextInput accessibilityLabel={t('Finished when')} multiline maxLength={2000} value={draft.acceptance}
+            placeholder={t('How to tell it is done. Leave it empty to judge by the goal itself')} placeholderTextColor={p.ink3}
             onChangeText={acceptance => setDraft({ ...draft, acceptance })} style={[styles.field, { color: p.ink, borderColor: p.line }]} />
-          <View style={styles.row}>
-            <View style={{ flex: 1 }}>
-              <Text style={[textStyle.small, { color: p.ink2 }]}>{t('Goal turns')}</Text>
-              <TextInput accessibilityLabel={t('Goal turns')} keyboardType="number-pad" maxLength={2} value={draft.turns}
-                onChangeText={turns => setDraft({ ...draft, turns })} style={[styles.field, { color: p.ink, borderColor: p.line }]} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[textStyle.small, { color: p.ink2 }]}>{t('Active minutes')}</Text>
-              <TextInput accessibilityLabel={t('Active minutes')} keyboardType="number-pad" maxLength={3} value={draft.minutes}
-                onChangeText={minutes => setDraft({ ...draft, minutes })} style={[styles.field, { color: p.ink, borderColor: p.line }]} />
-            </View>
-          </View>
           <View style={styles.row}>
             {button(canStart ? 'Start goal' : 'Save', () => void send(canStart ? 'start' : 'edit'), !draft.objective.trim())}
             {button('Cancel', () => setDraft(null))}
@@ -108,9 +96,9 @@ export function BotGoalCard({ botId, sessionId, goal, canWrite, open, onOpen, on
         </> : <>
           {goal ? <>
             <Text selectable style={[textStyle.settingsRow, { color: p.ink }]}>{goal.objective}</Text>
-            {goal.acceptance ? <Text selectable style={{ color: p.ink2 }}>{t('Done when') + ' · ' + goal.acceptance}</Text> : null}
-            <Text style={{ color: p.ink2 }}>{statusOf(goal) + ' · ' + t('{used} of {max} turns', { used: goal.turns, max: goal.maxTurns })}</Text>
-            {goal.reason ? <Text style={{ color: p.ink2 }}>{goal.reason}</Text> : null}
+            {goal.acceptance ? <Text selectable style={{ color: p.ink2 }}>{t('Finished when') + ' · ' + goal.acceptance}</Text> : null}
+            <Text style={{ color: p.ink2 }}>{[statusOf(goal), goal.turns > 0 ? t('Turn {n}', { n: goal.turns }) : ''].filter(Boolean).join(' · ')}</Text>
+            {goal.reason ? <Text style={{ color: p.ink2 }}>{hostText(goal.reason)}</Text> : null}
             {goal.checkpoint ? <Text selectable style={{ color: p.ink }}>{goal.checkpoint.summary}</Text> : null}
             {goal.checkpoint?.evidence ? <Text selectable style={{ color: p.ink }}>{goal.checkpoint.evidence}</Text> : null}
             {goal.checkpoint?.next ? <Text selectable style={{ color: p.ink2 }}>{t('Next step') + ' · ' + goal.checkpoint.next}</Text> : null}
