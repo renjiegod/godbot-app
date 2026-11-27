@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ElementRef } from 'react'
 import {
   BackHandler,
   Modal,
@@ -13,6 +13,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Crypto from 'expo-crypto'
 import * as SecureStore from 'expo-secure-store'
+import { WorkBoardDiscussion } from './work-board-discussion.tsx'
 import { useTeam } from '../team/context.tsx'
 import { SheetHeader } from '../nav/sheet.tsx'
 import { t } from '../ui/i18n.ts'
@@ -128,12 +129,18 @@ export function WorkBoardScreen({ route, navigation }: any) {
 function BoardContent({ route, navigation }: any) {
   const { p } = useTheme(),
     insets = useSafeAreaInsets()
-  const { computer, call, onFeed, online, team } = useTeam()
+  const { computer, call, onFeed, online, team, hello } = useTeam()
+  const discussionsSupported = useRef(false)
+  if (hello) discussionsSupported.current = hello.capabilities.includes('work-board-discussion-v1')
   const params = route.params ?? {},
     device = computer?.hostDeviceId ?? ''
   const [filters, setFilters] = useState({ ...defaultFilters, ...params.filters } as typeof defaultFilters)
   const [phase, setPhase] = useState(''),
     [selected, setSelected] = useState<string | null>(params.id ?? null)
+  const [discussion, setDiscussion] = useState(!!params.comment)
+  const [commentFocus, setCommentFocus] = useState<string | undefined>(params.comment)
+  const detailScroll = useRef<ElementRef<typeof ScrollView>>(null)
+  const discussionOffset = useRef(0)
   const [opts, setOpts] = useState<Options | null>(null),
     [trail, setTrail] = useState(false)
   const [expandedAttempt, setExpandedAttempt] = useState<number | null>(null)
@@ -191,6 +198,8 @@ function BoardContent({ route, navigation }: any) {
     }
     if (selected) {
       setSelected(null)
+      setDiscussion(false)
+      setCommentFocus(undefined)
       setTrail(false)
       return true
     }
@@ -207,6 +216,8 @@ function BoardContent({ route, navigation }: any) {
   const pick = (id: string) => {
     setForm(null)
     setSelected(id)
+    setDiscussion(false)
+    setCommentFocus(undefined)
     setTrail(false)
     setExpandedAttempt(null)
   }
@@ -436,7 +447,7 @@ function BoardContent({ route, navigation }: any) {
             title={form ? name(actionNames, form.op) : (item?.id ?? t('Work item'))}
             left={{ label: t('Back'), onPress: close }}
           />
-          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.body}>
+          <ScrollView ref={detailScroll} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.body}>
             {form ? (
               <>
                 {['create', 'edit', 'dispatch'].includes(form.op) ? (
@@ -510,6 +521,27 @@ function BoardContent({ route, navigation }: any) {
                   name(markNames, item.mark) + ' · ' + owner(item.owner) + ' · ' + name(sourceNames, item.source),
                   true,
                 )}
+                <View style={styles.row} accessibilityRole="tablist">
+                  {[false, true].map(show => (
+                    <Pressable key={String(show)} accessibilityRole="tab" accessibilityState={{ selected: discussion === show }}
+                      onPress={() => { setDiscussion(show); if (!show) setCommentFocus(undefined) }}
+                      style={[styles.control, { backgroundColor: discussion === show ? p.hover : p.main }]}>
+                      <Text style={[typeScale.settingsRow, { color: discussion === show ? p.accent : p.ink2 }]}>
+                        {t(show ? 'Discussion' : 'Details')}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+                <View onLayout={event => { discussionOffset.current = event.nativeEvent.layout.y }}
+                  style={discussion ? undefined : { display: 'none' }}>
+                  {discussionsSupported.current ? (
+                    <WorkBoardDiscussion key={item.id} id={item.id} active={discussion} disabled={disabled} focus={commentFocus}
+                      openExecution={original} onScroll={offset => requestAnimationFrame(() =>
+                        detailScroll.current?.scrollTo({ y: discussionOffset.current + offset, animated: false }))}
+                      onCompose={() => setTimeout(() => detailScroll.current?.scrollToEnd({ animated: true }), 150)} />
+                  ) : line(t('Upgrade the paired host to use work item discussions.'), true)}
+                </View>
+                <View style={discussion ? { display: 'none' } : { gap: 8 }}>
                 {line(t('Acceptance criteria') + '\n' + (item.criteria || '—'))}
                 {item.evidence
                   ? line(t('Evidence') + ' · v' + item.evidenceRevision + '\n' + item.evidence)
@@ -578,12 +610,13 @@ function BoardContent({ route, navigation }: any) {
                       : null}
                   </View>
                 ))}
+                </View>
               </>
             ) : (
               line(t('Loading…'))
             )}
           </ScrollView>
-          <View style={[styles.row, styles.footer, { borderColor: p.line }]}>
+          <View style={[styles.row, styles.footer, { borderColor: p.line }, discussion && !form && { display: 'none' }]}>
             {form
               ? control(t('Confirm'), () => void submit(), invalid, true)
               : item?.source !== 'run'

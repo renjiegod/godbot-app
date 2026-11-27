@@ -1,5 +1,6 @@
 // Godbot: turning what arrives into what the phone shows. Pure functions, so the
 // background push task, the in-app notices and the tests share them.
+import { boardCommentTarget } from './work-board-link.ts'
 import { decryptPush, type PushNotification } from '../../godbot/link/push.ts'
 
 export type ChannelId = 'needs-you' | 'messages' | 'connection'
@@ -44,22 +45,27 @@ export interface LocalNotice {
   title: string
   body: string
   channelId: ChannelId
-  data: { kind: string; botId?: string; roomId?: string; sessionId?: string; host?: string }
+  data: { kind: string; botId?: string; roomId?: string; sessionId?: string; host?: string; workItemId?: string; commentId?: string }
 }
 
 /** A pushed notification as the phone shows it. */
+function boardFields(note: unknown) {
+  const board = boardCommentTarget(note)
+  return board ? { workItemId: board.id, commentId: board.comment } : {}
+}
+
 export function pushContent(note: PushNotification, host: string): LocalNotice {
   return {
     title: note.title,
     body: note.body,
     channelId: channelFor(note.kind),
-    data: { kind: note.kind, host, ...(note.botId ? { botId: note.botId } : {}), ...(note.roomId ? { roomId: note.roomId } : {}), ...(note.sessionId ? { sessionId: note.sessionId } : {}) },
+    data: { kind: note.kind, host, ...boardFields(note), ...(note.botId ? { botId: note.botId } : {}), ...(note.roomId ? { roomId: note.roomId } : {}), ...(note.sessionId ? { sessionId: note.sessionId } : {}) },
   }
 }
 
 /** A live `notice` feed event, shown while the app is in the background. */
 export function noticeContent(
-  notice: { kind?: unknown; name?: unknown; title?: unknown; text?: unknown; botId?: unknown; roomId?: unknown; sessionId?: unknown },
+  notice: { kind?: unknown; name?: unknown; title?: unknown; text?: unknown; botId?: unknown; roomId?: unknown; sessionId?: unknown; workItemId?: unknown; commentId?: unknown },
   words: { finished: string; newReply: string; approval: string; question: string },
 ): LocalNotice | null {
   const kind = typeof notice.kind === 'string' ? notice.kind : ''
@@ -75,7 +81,7 @@ export function noticeContent(
     title: head,
     body,
     channelId: channelFor(kind),
-    data: { kind, ...(str(notice.botId) ? { botId: str(notice.botId) } : {}), ...(str(notice.roomId) ? { roomId: str(notice.roomId) } : {}), ...(str(notice.sessionId) ? { sessionId: str(notice.sessionId) } : {}) },
+    data: { kind, ...boardFields(notice), ...(str(notice.botId) ? { botId: str(notice.botId) } : {}), ...(str(notice.roomId) ? { roomId: str(notice.roomId) } : {}), ...(str(notice.sessionId) ? { sessionId: str(notice.sessionId) } : {}) },
   }
 }
 

@@ -10,6 +10,7 @@ const ZH = DICTIONARY.zh as Record<string, string>
 const MOBILE_SENSE = new Set(['New', 'Light', 'Back', 'Unknown'])
 
 const MOBILE_ZH: Record<string, string> = {
+  'This comment belongs to another paired computer.': '这条评论属于另一台配对电脑。',
   '{count} tool calls': '{count} 次工具调用',
   '{count} running': '{count} 项进行中',
   // A group member's work sheet (member-work.tsx); the desktop's panel says the same.

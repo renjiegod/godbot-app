@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { encryptPush, generatePushKey } from '../../godbot/link/push.ts'
+import { boardCommentTarget, makeBoardCommentLink, parseBoardCommentLink } from './work-board-link.ts'
 import { channelFor, noticeContent, openPush, pushContent, pushFields, targetOf } from './push-payload.ts'
 
 const HOST = 'd-MAyclgO5Kks57TlYv5JAEQ'
@@ -55,4 +56,23 @@ test('a live notice becomes a notification text, and its tap target', () => {
   assert.deepEqual(targetOf({ roomId: 'r1', botId: 'b2' }), { kind: 'room', id: 'r1' })
   assert.deepEqual(targetOf({ botId: 'b2' }), { kind: 'bot', id: 'b2' })
   assert.equal(targetOf({}), null)
+})
+
+test('a board reply keeps the card and comment together in live and encrypted notices', () => {
+  const workItemId = 'GB-71'
+  const commentId = '96ab32d0-d71f-4f3d-9c5c-c4457d02c6dc'
+  const reply = { ...note, kind: 'message', workItemId, commentId }
+  const key = generatePushKey()
+  const opened = openPush({ h: HOST, c: encryptPush(key, HOST, reply) }, () => key)
+  assert.ok(opened)
+  const fromPush = pushContent(opened, HOST)
+  assert.deepEqual(boardCommentTarget(fromPush.data), { id: workItemId, comment: commentId })
+  const fromLive = noticeContent({ ...reply, text: reply.body }, {
+    finished: 'Finished', approval: 'Approval needed', question: 'Has a question', newReply: 'New reply',
+  })
+  assert.deepEqual(boardCommentTarget(fromLive?.data), { id: workItemId, comment: commentId })
+  const link = makeBoardCommentLink(workItemId, commentId, HOST)
+  assert.deepEqual(parseBoardCommentLink(link), { id: workItemId, comment: commentId, host: HOST })
+  assert.equal(parseBoardCommentLink(link + '&host=another'), null)
+  assert.equal(boardCommentTarget({ workItemId, commentId: 'unrelated' }), null)
 })

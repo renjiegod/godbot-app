@@ -3,13 +3,14 @@ import { StatusBar } from 'expo-status-bar'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, Alert, Linking, Text, useColorScheme, View } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
-import { DefaultTheme, NavigationContainer, type NavigationState } from '@react-navigation/native'
+import { DefaultTheme, NavigationContainer, StackActions, useNavigationContainerRef, type NavigationState } from '@react-navigation/native'
 import { setLang, t } from './src/ui/i18n.ts'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { loadComputer, loadIdentity, listMachines, onPrefsChange, readPrefs, setActiveComputer, type PhoneIdentity, type SavedComputer } from './src/store.ts'
 import { ComputersCtx, type ComputerActions } from './src/nav/computers.ts'
 import { errorText } from './src/team/link.ts'
 import { isPairingLink } from './src/team/pairing-link.ts'
+import { parseBoardCommentLink } from './src/team/work-board-link.ts'
 import { pauseKeepAlive, syncKeepAlive } from './src/team/keepalive.ts'
 import { loadSeen } from './src/team/seen.ts'
 import { DEMO, DemoProvider, TeamProvider, useTeam } from './src/team/context.tsx'
@@ -61,7 +62,32 @@ function ThemedShell({ lang }: { lang?: string }) {
   // A language change re-mounts the navigator so every screen reads the new
   // strings; the saved navigation state keeps the user where they were.
   const navState = useRef<NavigationState | undefined>(undefined)
-  const { team } = useTeam()
+  const { team, computer } = useTeam()
+  const navigation = useNavigationContainerRef()
+  const pendingLink = useRef<ReturnType<typeof parseBoardCommentLink>>(null)
+  const openComment = useCallback(() => {
+    const link = pendingLink.current
+    if (!link || !navigation.isReady()) return
+    pendingLink.current = null
+    if (link.host !== computer?.hostDeviceId) {
+      Alert.alert(t('Work board'), t('This comment belongs to another paired computer.'))
+      return
+    }
+    navigation.dispatch(StackActions.push('WorkBoard', { id: link.id, comment: link.comment }))
+  }, [computer?.hostDeviceId, navigation])
+  useEffect(() => {
+    let active = true
+    const open = (url?: string | null) => {
+      const link = parseBoardCommentLink(url)
+      if (active && link) {
+        pendingLink.current = link
+        openComment()
+      }
+    }
+    void Linking.getInitialURL().then(open)
+    const subscription = Linking.addEventListener('url', (event) => open(event.url))
+    return () => { active = false; subscription.remove() }
+  }, [openComment])
   const value = useMemo(() => ({ dark, p: palette(dark, team?.prefs?.theme, team?.prefs?.accent) }), [dark, team?.prefs?.theme, team?.prefs?.accent])
   const navTheme = useMemo(() => ({
     dark,
@@ -77,7 +103,7 @@ function ThemedShell({ lang }: { lang?: string }) {
   }), [dark, value])
   return (
     <ThemeContext.Provider value={value}>
-      <NavigationContainer key={lang} theme={navTheme} initialState={navState.current} onStateChange={state => { navState.current = state }}>
+      <NavigationContainer key={lang} ref={navigation} onReady={openComment} theme={navTheme} initialState={navState.current} onStateChange={state => { navState.current = state }}>
         <ErrorBoundary>
           <ShellB />
         </ErrorBoundary>

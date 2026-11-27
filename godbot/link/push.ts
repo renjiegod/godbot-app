@@ -21,6 +21,8 @@ export interface PushNotification {
   botId?: string
   sessionId?: string
   roomId?: string
+  workItemId?: string
+  commentId?: string
   seq?: number
   time: number
 }

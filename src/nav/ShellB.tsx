@@ -1,6 +1,6 @@
 // Modified for Godbot. See NOTICE.
 import { createNativeStackNavigator } from '@react-navigation/native-stack'
-import { useNavigation, type NavigationProp, type ParamListBase } from '@react-navigation/native'
+import { StackActions, useNavigation, type NavigationProp, type ParamListBase } from '@react-navigation/native'
 import { useContext, useEffect, useRef, useState } from 'react'
 import { ActivityIndicator, Alert, Image, Platform, Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native'
 import * as Notifications from 'expo-notifications'
@@ -26,6 +26,7 @@ import { NeedsYou } from '../screens/NeedsYou.tsx'
 import { Settings } from '../screens/Settings.tsx'
 import { TeamList, type ChatTarget } from '../screens/TeamList.tsx'
 import { Automation } from '../screens/automation.tsx'
+import { boardCommentTarget } from '../team/work-board-link.ts'
 import { WorkBoardScreen } from '../screens/work-board.tsx'
 import { BotDetails, BotEdit, NewBot, NewGroup, GroupDetails, GroupSettings, Memory, Folder, Usage, Computers, Secrets } from '../screens/manage.tsx'
 import { Providers, Connectors, Capabilities, TeamUsage, Location, Updates, About } from '../screens/settings-pages.tsx'
@@ -340,7 +341,7 @@ function NoticeBanner() {
   const { shown: drawerOpen } = useDrawer()
   const navigation = useNavigation<NavigationProp<ParamListBase>>()
   const insets = useSafeAreaInsets()
-  const [notice, setNotice] = useState<{ text: string; target: ChatTarget; seq: number } | null>(null)
+  const [notice, setNotice] = useState<{ text: string; target: ChatTarget; board: ReturnType<typeof boardCommentTarget>; seq: number } | null>(null)
   const banners = useRef(true)
   const fallbackRef = useRef<string | undefined>(undefined)
   fallbackRef.current = (primaryBot(team) ?? team?.bots?.[0])?.id
@@ -358,22 +359,30 @@ function NoticeBanner() {
         ? { kind: 'room', id: data.roomId }
         : { kind: 'bot', id: data.botId ?? '' }
       if (!target.id) return
+      const board = boardCommentTarget(data)
+      const state = navigation.getState()
+      const screen = state?.routes[state.index]
+      if (board && screen?.name === 'WorkBoard' && (screen.params as { id?: string } | undefined)?.id === board.id) return
       // The chat on screen already shows its own messages and cards.
       const active = activeChatTarget(navigation.getState(), fallbackRef.current)
-      if (active?.kind === target.kind && active.id === target.id) return
+      if (!board && active?.kind === target.kind && active.id === target.id) return
       const body = typeof data.text === 'string' && data.text.length > 0
         ? data.text
         : data.kind === 'done' ? t('Finished') : t('New reply')
       const head = data.title ?? data.name
       const text = head !== undefined && head !== '' ? `${head}：${body}` : body
       const mine = ++seq
-      setNotice({ text, target, seq: mine })
+      setNotice({ text, target, board, seq: mine })
       setTimeout(() => setNotice(current => (current?.seq === mine ? null : current)), 8000)
     })
   }, [onFeed, navigation])
   if (notice === null || drawerOpen) return null
   return (
-    <Pressable accessibilityRole="button" onPress={() => { openChat(navigation, notice.target); setNotice(null) }}
+    <Pressable accessibilityRole="button" onPress={() => {
+      if (notice.board) navigation.dispatch(StackActions.push('WorkBoard', notice.board))
+      else openChat(navigation, notice.target)
+      setNotice(null)
+    }}
       style={[{ position: 'absolute', top: insets.top + 58, left: 12, right: 12, zIndex: 10, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: p.card, borderColor: p.accent, borderWidth: 1 }, shadow(2)]}>
       <Text style={[typeScale.small, { color: p.ink }]} numberOfLines={2}>{notice.text}</Text>
     </Pressable>
@@ -397,8 +406,12 @@ function BackgroundNotices() {
     const data = last.notification.request.content.data as { host?: unknown } | undefined
     // A notice from another paired computer opens nothing here.
     if (typeof data?.host === 'string' && host !== undefined && data.host !== host) return
-    const target = targetOf(data)
-    if (target !== null) openChat(navigation, target)
+    const board = boardCommentTarget(data)
+    if (board) navigation.dispatch(StackActions.push('WorkBoard', board))
+    else {
+      const target = targetOf(data)
+      if (target !== null) openChat(navigation, target)
+    }
   }, [last, host, navigation])
   return null
 }
