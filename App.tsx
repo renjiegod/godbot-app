@@ -10,7 +10,7 @@ import { loadComputer, loadIdentity, listMachines, onPrefsChange, readPrefs, set
 import { ComputersCtx, type ComputerActions } from './src/nav/computers.ts'
 import { errorText } from './src/team/link.ts'
 import { isPairingLink } from './src/team/pairing-link.ts'
-import { parseBoardCommentLink } from './src/team/work-board-link.ts'
+import { parseBoardCommentLink, parseBoardViewLink } from './src/team/work-board-link.ts'
 import { pauseKeepAlive, syncKeepAlive } from './src/team/keepalive.ts'
 import { loadSeen } from './src/team/seen.ts'
 import { DEMO, DemoProvider, TeamProvider, useTeam } from './src/team/context.tsx'
@@ -64,21 +64,21 @@ function ThemedShell({ lang }: { lang?: string }) {
   const navState = useRef<NavigationState | undefined>(undefined)
   const { team, computer } = useTeam()
   const navigation = useNavigationContainerRef()
-  const pendingLink = useRef<ReturnType<typeof parseBoardCommentLink>>(null)
+  const pendingLink = useRef<ReturnType<typeof parseBoardCommentLink> | ReturnType<typeof parseBoardViewLink>>(null)
   const openComment = useCallback(() => {
     const link = pendingLink.current
     if (!link || !navigation.isReady()) return
     pendingLink.current = null
     if (link.host !== computer?.hostDeviceId) {
-      Alert.alert(t('Work board'), t('This comment belongs to another paired computer.'))
+      Alert.alert(t('Work board'), t('This link belongs to another paired computer.'))
       return
     }
-    navigation.dispatch(StackActions.push('WorkBoard', { id: link.id, comment: link.comment }))
+    navigation.dispatch(StackActions.push('WorkBoard', 'viewId' in link ? { viewId: link.viewId } : { id: link.id, comment: link.comment }))
   }, [computer?.hostDeviceId, navigation])
   useEffect(() => {
     let active = true
     const open = (url?: string | null) => {
-      const link = parseBoardCommentLink(url)
+      const link = parseBoardCommentLink(url) ?? parseBoardViewLink(url)
       if (active && link) {
         pendingLink.current = link
         openComment()

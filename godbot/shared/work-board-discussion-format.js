@@ -88,7 +88,7 @@ export function chooseCommentAddress(text, range, bot) {
 export const commentRunLabels = {
   queued: 'Queued',
   sending: 'Sending',
-  sent: 'Delivered',
+  sent: 'Waiting for Bot to read',
   running: 'Working',
   waiting: 'Waiting for a report',
   answered: 'Replied',
@@ -101,3 +101,19 @@ export const commentRunLabels = {
 }
 
 export const commentLink = (id, comment) => '#/godbot/work/' + id + '/comment/' + comment
+
+export const commentModes = {
+  queue: 'Run after this turn',
+  steer: 'Add to this run',
+  restart: 'Stop and start a new run',
+  note: 'Do not run',
+}
+
+export function quoteRanges(text, quote) {
+  const result = []
+  const value = quote.trim()
+  if (!value) return result
+  let index = -1
+  while ((index = text.indexOf(value, index + 1)) !== -1) result.push({ start: index, end: index + value.length, quote: value })
+  return result
+}

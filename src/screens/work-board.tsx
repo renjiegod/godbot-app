@@ -21,6 +21,7 @@ import { useTheme, type as typeScale } from '../ui/tokens.ts'
 import {
   actionNames,
   activityByAttempt,
+  boardInput,
   currentReview,
   defaultFilters,
   markNames,
@@ -29,6 +30,9 @@ import {
   sourceNames,
   useWorkBoard,
 } from '../../godbot/shared/work-board.js'
+import { cardGroups, priorities, timelineBars, viewDisplay } from '../../godbot/shared/work-board-planning.js'
+import { BoardManagement, BoardPlanEditor, assigneeName, boardName, type Catalog, type Display, type Filters, type PlanFields, type SavedView } from './work-board-management.tsx'
+import { BoardArtifacts, BoardExecutions, BoardPlanningDetail, type Plan } from './work-board-detail.tsx'
 
 type Pair = { id: string; name: string }
 type Ref = { botId?: string; roomId?: string; sessionId?: string; messageId?: string; turnId?: number }
@@ -44,9 +48,17 @@ type Card = {
   priority: number
   version: string
   updated: number
+  assignee?: string
+  statusId?: string
+  startDate?: string
+  dueDate?: string
+  labels?: string[]
 }
 type Item = Card & {
   criteria: string
+  fields?: PlanFields
+  planning?: Plan
+  reviewBlocked?: boolean
   evidence?: string
   evidenceRevision?: number
   origin?: Ref
@@ -65,8 +77,8 @@ type Item = Card & {
     execution?: Ref
   }[]
 }
-type Column = { phase: string; items: Card[]; total: number; next: number[] | null }
-type Board = { columns: Column[]; counts: Record<string, number>; bots: Pair[]; rooms: Pair[]; readOnly: boolean }
+type Column = { phase: string; items: Card[]; total: number; next: (number | string)[] | null }
+type Board = { columns: Column[]; counts: Record<string, number>; bots: Pair[]; rooms: Pair[]; readOnly: boolean; catalog?: Catalog }
 type Form = {
   op: string
   base?: Item
@@ -78,6 +90,8 @@ type Form = {
   text: string
   origin?: Ref
   room?: string
+  fields?: PlanFields
+  commentId?: string
 }
 type Options = { name: string; options: [string, string][]; select: (v: string) => void }
 const name = (dict: Record<string, string>, key: string) => t(dict[key] ?? key)
@@ -131,10 +145,21 @@ function BoardContent({ route, navigation }: any) {
     insets = useSafeAreaInsets()
   const { computer, call, onFeed, online, team, hello } = useTeam()
   const discussionsSupported = useRef(false)
+  const managementSupported = useRef(false)
+  if (hello) managementSupported.current = hello.capabilities.includes('work-board-management-v1')
   if (hello) discussionsSupported.current = hello.capabilities.includes('work-board-discussion-v1')
   const params = route.params ?? {},
     device = computer?.hostDeviceId ?? ''
-  const [filters, setFilters] = useState({ ...defaultFilters, ...params.filters } as typeof defaultFilters)
+  const [filters, setFilters] = useState<Filters>({ ...defaultFilters, ...params.filters })
+  const [display, setDisplay] = useState<Display>({ layout: 'list', groupBy: 'phase' })
+  const [viewId, setViewId] = useState<string>(params.viewId ?? '')
+  const [extra, setExtra] = useState('')
+  const [initialRun, setInitialRun] = useState<string | undefined>(undefined)
+  const [quote, setQuote] = useState<string | undefined>(undefined)
+  const [selecting, setSelecting] = useState(false)
+  const [checked, setChecked] = useState(() => new Map<string, string>())
+  const [viewError, setViewError] = useState('')
+  const loadedView = useRef('')
   const [phase, setPhase] = useState(''),
     [selected, setSelected] = useState<string | null>(params.id ?? null)
   const [discussion, setDiscussion] = useState(!!params.comment)
@@ -163,7 +188,11 @@ function BoardContent({ route, navigation }: any) {
     let live = true
     void SecureStore.getItemAsync(prefKey)
       .then((v) => {
-        if (live && v) setFilters({ ...defaultFilters, ...JSON.parse(v), ...params.filters })
+        if (live && v) {
+          const saved = JSON.parse(v)
+          setFilters({ ...defaultFilters, ...(saved.filters ?? saved), ...params.filters })
+          if (saved.display) setDisplay(viewDisplay(saved.display))
+        }
       })
       .catch(() => {})
       .finally(() => {
@@ -175,8 +204,8 @@ function BoardContent({ route, navigation }: any) {
   }, [prefKey])
   useEffect(() => {
     if (prefsReady)
-      void SecureStore.setItemAsync(prefKey, JSON.stringify({ ...filters, search: '' })).catch(() => {})
-  }, [filters, prefKey, prefsReady])
+      void SecureStore.setItemAsync(prefKey, JSON.stringify({ filters: { ...filters, search: '' }, display })).catch(() => {})
+  }, [filters, display, prefKey, prefsReady])
   const state = useWorkBoard({ call, subscribe: onFeed, online, identity: device, filters, selected })
   useEffect(() => {
     if (state.accessGone) {
@@ -187,6 +216,19 @@ function BoardContent({ route, navigation }: any) {
   const board = state.view as Board | null,
     item = state.item as Item | null,
     disabled = !online || !state.reachable || !!team?.readOnly || !!board?.readOnly || state.busy || !board
+  const applyView = (saved?: SavedView) => {
+    setViewId(saved?.id ?? '')
+    setFilters({ ...defaultFilters, ...saved?.filters })
+    setDisplay(saved?.display ?? { layout: 'list', groupBy: 'phase' })
+    setPhase('')
+  }
+  useEffect(() => {
+    if (!board?.catalog || !params.viewId || !prefsReady || loadedView.current === params.viewId) return
+    loadedView.current = params.viewId
+    const saved = board.catalog.views.find(view => view.id === params.viewId && view.visibility === 'shared')
+    if (saved) applyView(saved)
+    else setViewError(t('The saved view is unavailable.'))
+  }, [board?.catalog, params.viewId, prefsReady])
   const close = useCallback(() => {
     if (opts) {
       setOpts(null)
@@ -199,6 +241,8 @@ function BoardContent({ route, navigation }: any) {
     if (selected) {
       setSelected(null)
       setDiscussion(false)
+      setExtra('')
+      setQuote(undefined)
       setCommentFocus(undefined)
       setTrail(false)
       return true
@@ -209,7 +253,7 @@ function BoardContent({ route, navigation }: any) {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => navigation.isFocused() && close())
     return () => sub.remove()
   }, [close, navigation])
-  const update = (key: keyof typeof defaultFilters, value: string) =>
+  const update = (key: string, value: string) =>
     setFilters((prev) => ({ ...prev, [key]: value }))
   const edit = (key: keyof Form, value: string | number) =>
     setForm((prev) => (prev ? { ...prev, [key]: value } : null))
@@ -217,6 +261,9 @@ function BoardContent({ route, navigation }: any) {
     setForm(null)
     setSelected(id)
     setDiscussion(false)
+    setExtra('')
+    setInitialRun(undefined)
+    setQuote(undefined)
     setCommentFocus(undefined)
     setTrail(false)
     setExpandedAttempt(null)
@@ -251,14 +298,23 @@ function BoardContent({ route, navigation }: any) {
     </Text>
   )
   const owner = (id?: string) => board?.bots.find((b) => b.id === id)?.name ?? t('Unassigned')
-  function start(op: string, base?: Item, child?: Child) {
+  const cardOwner = (card: Card) => card.assignee ? t(assigneeName(card.assignee, board?.catalog)) : owner(card.owner)
+  function start(op: string, base?: Item, child?: Child, seed?: { parent?: string; commentId?: string; title?: string }) {
+    const assignee = base?.fields?.assignee
+    const customValues = Object.fromEntries(Object.entries(base?.fields?.customValues ?? {})
+      .filter(([id]) => board?.catalog?.properties.some(p => p.id === id && !p.archived)))
+
     setForm({
       op,
       base,
       child,
-      title: base?.title ?? '',
+      title: base?.title ?? seed?.title ?? '',
       criteria: base?.criteria ?? '',
-      owner: op === 'transfer' ? '' : (base?.owner ?? (filters.owner === 'unassigned' ? '' : filters.owner)),
+      owner: op === 'transfer' ? '' : assignee?.startsWith('bot/') ? assignee.slice(4)
+        : (assignee || base?.owner || (filters.owner === 'unassigned' ? '' : filters.owner)),
+      fields: op === 'edit-fields' ? { ...base?.fields, assignee: undefined, customValues, statusId: base?.statusId ?? '' }
+        : seed?.parent ? { parent: seed.parent } : {},
+      commentId: seed?.commentId,
       priority: base?.priority ?? 0,
       text: '',
       origin: base?.origin,
@@ -267,24 +323,17 @@ function BoardContent({ route, navigation }: any) {
   }
   async function submit() {
     if (!form) return
-    const { op, base, child, title, criteria, owner, priority, text, origin, room } = form
-    const next = (await state.act(
-      {
-        op,
-        id: base?.id,
-        version: base?.version,
-        evidenceRevision: child?.evidenceRevision ?? base?.evidenceRevision,
-        childId: child?.id,
-        title,
-        criteria,
-        owner,
-        priority,
-        text,
-        origin,
-        room,
-      },
-      Crypto.randomUUID,
-    )) as Item | null
+    const request = boardInput(form) as Record<string, unknown>
+    if (managementSupported.current && ['create', 'edit-fields', 'dispatch', 'transfer'].includes(form.op)) {
+      if (/^(room|person)\//.test(form.owner)) {
+        request.assignee = form.owner
+        delete request.owner
+      } else if (form.op === 'edit-fields' && form.base?.source === 'draft') {
+        request.assignee = form.owner ? 'bot/' + form.owner : ''
+      }
+      if (form.op === 'edit-fields' && form.base?.source !== 'draft') delete request.assignee
+    }
+    const next = await state.act(request, Crypto.randomUUID) as Item | null
     if (next) pick(next.id)
   }
   function original(ref?: Ref) {
@@ -298,14 +347,42 @@ function BoardContent({ route, navigation }: any) {
       boardReference: true,
     })
   }
+  function openComment(id: string, commentId: string) {
+    if (id !== item?.id) pick(id)
+    setExtra('')
+    setDiscussion(true)
+    setCommentFocus(commentId)
+  }
+  const runPanel = (runId?: string) => {
+    setInitialRun(runId)
+    setDiscussion(false)
+    setExtra('runs')
+  }
+  const toggle = (card: Card) => setChecked(previous => {
+    const next = new Map(previous)
+    if (next.has(card.id)) next.delete(card.id)
+    else if (next.size < 100) next.set(card.id, card.version)
+    return next
+  })
+  const baseColumns = useMemo(() => (board?.columns ?? []).filter(c => !phase || c.phase === phase), [board?.columns, phase])
   const sections = useMemo(
-    () =>
-      board?.columns
-        .filter((c) => (!phase || c.phase === phase) && c.total > 0)
-        .map((c) => ({ ...c, data: c.items })) ?? [],
-    [board, phase],
+    () => {
+      if (display.groupBy === 'phase' && display.layout !== 'swimlane') {
+        return baseColumns.filter(c => c.total > 0).map(c => ({ ...c, title: '', data: c.items }))
+      }
+      const groups = cardGroups(baseColumns, display.groupBy) as { key: string; items: Card[] }[]
+      return groups.map(group => ({
+        phase: group.key, title: boardName(group.key, display.groupBy, board?.catalog),
+        items: group.items, data: display.layout === 'swimlane' ? [...group.items].sort((a, b) => a.phase.localeCompare(b.phase)) : group.items,
+        total: group.items.length, next: null,
+      }))
+    },
+    [baseColumns, display.groupBy, display.layout, board?.catalog],
   )
-  const filterButton = (field: keyof typeof defaultFilters, title: string, options: [string, string][]) =>
+  const plot = useMemo(() => display.layout === 'gantt' ? timelineBars(baseColumns.flatMap(column => column.items)) : null,
+    [baseColumns, display.layout])
+  const highlights = useMemo(() => new Map((plot?.bars ?? []).map(bar => [bar.card.id, bar])), [plot])
+  const filterButton = (field: string, title: string, options: [string, string][]) =>
     control(
       options.find((o) => o[0] === filters[field])?.[1] ?? t(title),
       () => select(t(title), [['', t(title)], ...options], (v) => update(field, v)),
@@ -313,7 +390,7 @@ function BoardContent({ route, navigation }: any) {
       !!filters[field],
       field,
     )
-  const report = state.error || (!online ? t('Reconnecting…') : '')
+  const report = viewError || state.error || (!online ? t('Reconnecting…') : '')
   const field = (title: string, k: 'title' | 'criteria' | 'text', multi = false) => (
     <View key={k}>
       {line(t(title), true)}
@@ -339,7 +416,7 @@ function BoardContent({ route, navigation }: any) {
     !form ||
     disabled ||
     stale ||
-    (['create', 'edit', 'dispatch'].includes(form.op) && !form.title.trim()) ||
+    (['create', 'edit', 'edit-fields', 'dispatch'].includes(form.op) && !form.title.trim()) ||
     (form.op === 'dispatch' && (!form.owner || !form.criteria.trim())) ||
     (form.op === 'transfer' && !form.owner) ||
     ((['reject', 'note'].includes(form.op) || !!form.child) && !form.text.trim())
@@ -377,8 +454,8 @@ function BoardContent({ route, navigation }: any) {
                 )}
               </View>
               <TextInput
-                accessibilityLabel={t('Search ID or title')}
-                placeholder={t('Search ID or title')}
+                accessibilityLabel={t('Search work and comments')}
+                placeholder={t('Search work and comments')}
                 placeholderTextColor={p.ink3}
                 value={filters.search}
                 onChangeText={(v) => update('search', v)}
@@ -401,31 +478,61 @@ function BoardContent({ route, navigation }: any) {
                   select(t('All statuses'), [['', t('All statuses')], ...listNames(phaseNames)], setPhase),
                 )}
               </ScrollView>
+              {managementSupported.current && board?.catalog ? <BoardManagement catalog={board.catalog} filters={filters}
+                changeFilters={patch => setFilters(old => ({ ...old, ...patch }))} display={display} setDisplay={setDisplay}
+                choose={select} selectedView={viewId} applyView={applyView} readOnly={disabled} selecting={selecting}
+                toggleSelecting={() => { setSelecting(!selecting); setChecked(new Map()) }}
+                selected={Array.from(checked, ([id, version]) => ({ id, version }))}
+                refresh={state.refresh} onBulk={rejected => setChecked(old => {
+                  const retained = new Map<string, string>()
+                  for (const { id } of rejected) {
+                    const version = old.get(id)
+                    if (version) retained.set(id, version)
+                  }
+                  return retained
+                })} /> : null}
+              {plot?.first ? line(plot.first + ' → ' + plot.last, true) : null}
             </View>
           }
           renderSectionHeader={({ section }) => (
             <Text accessibilityRole="header" style={[typeScale.headerTitle, { color: p.ink, marginVertical: 8 }]}>
-              {name(phaseIcons, section.phase)} {name(phaseNames, section.phase)} · {section.total}
+              {section.title || name(phaseIcons, section.phase) + ' ' + name(phaseNames, section.phase)} · {section.total}
             </Text>
           )}
           renderSectionFooter={({ section }) =>
             section.next ? control(t('Load more'), () => void state.more(section)) : null
           }
+          ListFooterComponent={display.groupBy !== 'phase' || display.layout === 'swimlane' ? <View style={styles.row}>
+            {baseColumns.filter(column => column.next).map(column => control(t('Load more') + ' · ' + name(phaseNames, column.phase),
+              () => void state.more(column), false, false, column.phase))}
+          </View> : undefined}
           renderItem={({ item: c }) => (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={c.id + ' ' + c.title + ' ' + owner(c.owner) + ' ' + name(markNames, c.mark)}
-              onPress={() => pick(c.id)}
-              style={[styles.card, { backgroundColor: p.card, borderColor: p.line }]}
+              accessibilityLabel={c.id + ' ' + c.title + ' ' + cardOwner(c) + ' ' + name(markNames, c.mark)}
+              accessibilityState={{ selected: checked.has(c.id) }}
+              onPress={() => selecting ? toggle(c) : pick(c.id)}
+              style={[styles.card, { backgroundColor: p.card, borderColor: checked.has(c.id) ? p.accent : p.line }]}
             >
-              {line(c.id + (c.priority ? ' · ↑ ' + t('High') : ''), true)}
+              {line(c.id + (c.priority ? ' · ' + t((priorities as Record<string, string>)[c.priority]) : ''), true)}
               <Text numberOfLines={2} style={[typeScale.settingsRow, { color: p.ink, fontWeight: '600' }]}>
                 {c.title}
               </Text>
               <Text numberOfLines={2} style={[typeScale.small, { color: p.ink2 }]}>
                 {c.hint}
               </Text>
-              {line(owner(c.owner) + ' · ' + name(markNames, c.mark), true)}
+              {line(cardOwner(c) + ' · ' +
+                (c.statusId ? boardName(c.statusId, 'status', board?.catalog) : name(markNames, c.mark)), true)}
+              {c.labels?.length || c.dueDate ? line([...(c.labels ?? []), c.dueDate].filter(Boolean).join(' · '), true) : null}
+              {display.layout === 'table' ? line([c.startDate, c.dueDate, name(phaseNames, c.phase)].filter(Boolean).join(' · '), true) : null}
+              {display.layout === 'swimlane' ? line(name(phaseNames, c.phase), true) : null}
+              {display.layout === 'gantt' && highlights.has(c.id) ? <>
+                {line([c.startDate, c.dueDate].filter(Boolean).join(' – '), true)}
+                <View style={{ height: 9, backgroundColor: p.hover, borderRadius: 5, overflow: 'hidden' }}>
+                  <View style={{ height: 9, backgroundColor: p.accent, marginLeft: (100 * (highlights.get(c.id)?.left ?? 0)) + '%',
+                    width: (100 * (highlights.get(c.id)?.width ?? 0)) + '%' } as never} />
+                </View>
+              </> : null}
             </Pressable>
           )}
           ListEmptyComponent={
@@ -450,29 +557,27 @@ function BoardContent({ route, navigation }: any) {
           <ScrollView ref={detailScroll} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.body}>
             {form ? (
               <>
-                {['create', 'edit', 'dispatch'].includes(form.op) ? (
+                {['create', 'edit', 'edit-fields', 'dispatch'].includes(form.op) ? (
                   <>
                     {field('Title', 'title')}
                     {field('Acceptance criteria', 'criteria', true)}
-                    {control(t('Priority') + ' · ' + t(form.priority ? 'High' : 'Normal'), () =>
-                      edit('priority', form.priority ? 0 : 1),
+                    {control(t('Priority') + ' · ' + t((priorities as Record<string, string>)[form.priority]), () =>
+                      select(t('Priority'), listNames(priorities), v => edit('priority', Number(v))),
                     )}
                   </>
                 ) : null}
-                {['create', 'edit', 'dispatch', 'transfer'].includes(form.op)
-                  ? control(t('Owner') + ' · ' + owner(form.owner), () =>
-                      select(
-                        t('Owner'),
-                        [
-                          ['', t('Unassigned')],
-                          ...pairs(
-                            board?.bots.filter((b) => form.op !== 'transfer' || b.id !== form.base?.owner) ?? [],
-                          ),
-                        ],
-                        (v) => edit('owner', v),
-                      ),
-                    )
+                {(['create', 'edit', 'dispatch', 'transfer'].includes(form.op) || form.op === 'edit-fields' && form.base?.source === 'draft')
+                  ? control(t('Owner') + ' · ' + (form.owner.includes('/') ? assigneeName(form.owner, board?.catalog) : owner(form.owner)), () =>
+                      select(t('Owner'), [['', t('Unassigned')], ...(managementSupported.current && board?.catalog
+                        ? board.catalog.assignees.filter(a => !['dispatch', 'transfer'].includes(form.op) || a.kind !== 'person')
+                          .map((a): [string, string] => [a.kind === 'bot' ? a.id.slice(4) : a.id, t(a.name)])
+                        : pairs(board?.bots ?? []))], v => edit('owner', v)))
                   : null}
+                {managementSupported.current && ['create', 'edit-fields'].includes(form.op)
+                  ? <BoardPlanEditor key={form.base?.id ?? 'create'} fields={form.fields ?? {}} catalog={board?.catalog}
+                    choose={select} item={form.base} change={data => setForm(old => old ? { ...old, fields: { ...old.fields, ...data } } : null)} />
+                  : null}
+
                 {form.op === 'dispatch'
                   ? line(
                       t(
@@ -518,30 +623,45 @@ function BoardContent({ route, navigation }: any) {
                   {item.title}
                 </Text>
                 {line(
-                  name(markNames, item.mark) + ' · ' + owner(item.owner) + ' · ' + name(sourceNames, item.source),
+                  name(markNames, item.mark) + ' · ' + cardOwner(item) + ' · ' + name(sourceNames, item.source),
                   true,
                 )}
                 <View style={styles.row} accessibilityRole="tablist">
-                  {[false, true].map(show => (
-                    <Pressable key={String(show)} accessibilityRole="tab" accessibilityState={{ selected: discussion === show }}
-                      onPress={() => { setDiscussion(show); if (!show) setCommentFocus(undefined) }}
-                      style={[styles.control, { backgroundColor: discussion === show ? p.hover : p.main }]}>
-                      <Text style={[typeScale.settingsRow, { color: discussion === show ? p.accent : p.ink2 }]}>
-                        {t(show ? 'Discussion' : 'Details')}
-                      </Text>
+                  {(managementSupported.current ? ['Details', 'Discussion', 'Runs', 'Artifacts'] : ['Details', 'Discussion']).map(tab => {
+                    const active = tab === (discussion ? 'Discussion' : extra === 'runs' ? 'Runs' : extra === 'artifacts' ? 'Artifacts' : 'Details')
+                    return <Pressable key={tab} accessibilityRole="tab" accessibilityState={{ selected: active }}
+                      onPress={() => {
+                        setDiscussion(tab === 'Discussion')
+                        setExtra(tab === 'Runs' ? 'runs' : tab === 'Artifacts' ? 'artifacts' : '')
+                        setInitialRun(undefined)
+                        if (tab !== 'Discussion') { setCommentFocus(undefined); setQuote(undefined) }
+                      }} style={[styles.control, { backgroundColor: active ? p.hover : p.main }]}>
+                      <Text style={[typeScale.settingsRow, { color: active ? p.accent : p.ink2 }]}>{t(tab)}</Text>
                     </Pressable>
-                  ))}
+                  })}
                 </View>
                 <View onLayout={event => { discussionOffset.current = event.nativeEvent.layout.y }}
                   style={discussion ? undefined : { display: 'none' }}>
                   {discussionsSupported.current ? (
                     <WorkBoardDiscussion key={item.id} id={item.id} active={discussion} disabled={disabled} focus={commentFocus}
-                      openExecution={original} onScroll={offset => requestAnimationFrame(() =>
+                      openExecution={original} openRun={managementSupported.current ? runPanel : undefined} quote={quote}
+                      openComment={commentId => openComment(item.id, commentId)}
+                      createSubtask={managementSupported.current ? entry => start('create', undefined, undefined, {
+                        parent: item.id, commentId: entry.id, title: entry.body.split('\n')[0].slice(0, 110),
+                      }) : undefined}
+                      onScroll={offset => requestAnimationFrame(() =>
                         detailScroll.current?.scrollTo({ y: discussionOffset.current + offset, animated: false }))}
                       onCompose={() => setTimeout(() => detailScroll.current?.scrollToEnd({ animated: true }), 150)} />
                   ) : line(t('Upgrade the paired host to use work item discussions.'), true)}
                 </View>
-                <View style={discussion ? { display: 'none' } : { gap: 8 }}>
+                {extra === 'runs' ? <BoardExecutions key={item.id + '/' + initialRun} id={item.id}
+                  initialRun={initialRun} readOnly={disabled} open={original} openComment={openComment}
+                  modify={async change => Boolean(await state.act({ ...change, id: item.id, version: item.version }, Crypto.randomUUID))} /> : null}
+                {extra === 'artifacts' ? <BoardArtifacts key={item.id} id={item.id} choose={select} openComment={openComment} /> : null}
+                <View style={discussion || extra ? { display: 'none' } : { gap: 8 }}>
+                {managementSupported.current ? <BoardPlanningDetail key={item.id} item={item} readOnly={disabled} catalog={board?.catalog}
+                  open={pick} openComment={openComment} annotate={text => { setQuote(text); setDiscussion(true); setExtra('') }}
+                  add={() => start('create', undefined, undefined, { parent: item.id })} /> : null}
                 {line(t('Acceptance criteria') + '\n' + (item.criteria || '—'))}
                 {item.evidence
                   ? line(t('Evidence') + ' · v' + item.evidenceRevision + '\n' + item.evidence)
@@ -616,19 +736,15 @@ function BoardContent({ route, navigation }: any) {
               line(t('Loading…'))
             )}
           </ScrollView>
-          <View style={[styles.row, styles.footer, { borderColor: p.line }, discussion && !form && { display: 'none' }]}>
+          <View style={[styles.row, styles.footer, { borderColor: p.line }, (discussion || extra) && !form && { display: 'none' }]}>
             {form
               ? control(t('Confirm'), () => void submit(), invalid, true)
-              : item?.source !== 'run'
-                ? item?.actions.map((op) =>
-                    control(
-                      name(actionNames, op),
-                      () => start(op, item),
-                      disabled,
-                      ['dispatch', 'approve'].includes(op),
-                    ),
-                  )
-                : null}
+              : item ? <>
+                {managementSupported.current ? control(t('Edit work item'), () => start('edit-fields', item), disabled) : null}
+                {item.source !== 'run' ? item.actions.map(op =>
+                  control(name(actionNames, op), () => start(op, item), disabled, ['dispatch', 'approve'].includes(op))) : null}
+              </> : null}
+
           </View>
         </View>
       ) : null}

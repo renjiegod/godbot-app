@@ -19,6 +19,9 @@ export const sourceNames = {
 export const markNames = {
   draft: 'Draft',
   archived: 'Archived',
+  duplicate: 'Duplicate work item',
+  manual: 'Manual task',
+  manualDone: 'Completed manually',
   queued: 'Queued',
   sent: 'Delivered',
   dependencies: 'Waiting for prerequisites',
@@ -44,6 +47,12 @@ export const markNames = {
 export const actionNames = {
   create: 'Save as draft',
   edit: 'Edit draft',
+  'edit-fields': 'Edit work item',
+  complete: 'Mark complete',
+  reopen: 'Reopen work item',
+  withdraw: 'Withdraw queued assignment',
+  'run-stop': 'Stop this run',
+  'run-retry': 'Retry this run',
   dispatch: 'Assign to Bot',
   archive: 'Archive draft',
   approve: 'Accept evidence',
@@ -55,6 +64,82 @@ export const actionNames = {
 }
 export const phaseIcons = { todo: '○', doing: '◐', attention: '!', review: '◇', done: '✓', history: '◷' }
 export const defaultFilters = { tab: 'all', search: '', owner: '', room: '', source: '', section: '' }
+
+// Cards in the current view keep their original version for bulk mutations.
+export function boardInput(form) {
+  const { op, base, child, title, owner, criteria, priority, origin, text, room, fields, commentId } = form
+  return {
+    op, id: base?.id, version: base?.version, childId: child?.id,
+    evidenceRevision: child?.evidenceRevision ?? base?.evidenceRevision,
+    title, owner, criteria, priority, origin, text, room, commentId, ...fields,
+  }
+}
+
+export function useBoardRead({ call, endpoint, id, active, online = true, subscribe, query }) {
+  const key = JSON.stringify({ id, ...query })
+  const [state, setState] = useState({ key: '', data: null, error: '' })
+  const refreshRef = useRef(null)
+  useEffect(() => {
+    if (!active || !id || !online) return
+    let disposed = false
+    let reading = false, pending = false, timer
+    const refresh = async () => {
+      if (disposed) return
+      if (reading) { pending = true; return }
+      reading = true
+      try {
+        const data = await call(endpoint, JSON.parse(key))
+        if (!disposed) setState({ key, data, error: '' })
+      } catch (cause) {
+        if (!disposed) setState(previous => ({ key, data: previous.key === key ? previous.data : null, error: cause.message ?? String(cause) }))
+      } finally {
+        reading = false
+        if (pending && !disposed) { pending = false; plan() }
+      }
+    }
+    const plan = () => {
+      if (timer) return
+      timer = setTimeout(() => { timer = null; void refresh() }, 650)
+    }
+    refreshRef.current = refresh
+    void refresh()
+    const off = subscribe?.((topic, event) => {
+      if (topic === 'work-board' || topic === 'revision' || topic === 'hello' ||
+        (topic === 'live' && endpoint === 'board-runs') ||
+        (topic === 'work-board-discussion' && event?.id === id)) plan()
+    })
+    const poll = endpoint === 'board-runs' ? setInterval(plan, 2500) : null
+    return () => {
+      disposed = true
+      refreshRef.current = null
+      clearTimeout(timer)
+      clearInterval(poll)
+      off?.()
+    }
+  }, [active, call, endpoint, id, key, online, subscribe])
+  return {
+    data: state.key === key ? state.data : null,
+    error: state.key === key ? state.error : '',
+    refresh: () => refreshRef.current?.(),
+  }
+}
+
+export function useBoardLookup(call, search, enabled) {
+  const [result, setResult] = useState({ search: '', choices: [] })
+  useEffect(() => {
+    const value = search.trim()
+    if (!enabled || !value) return
+    let open = true
+    const timer = setTimeout(async () => {
+      try {
+        const views = await Promise.all(['all', 'history'].map(tab => call('board-view', { tab, search: value, limit: 6 })))
+        if (open) setResult({ search, choices: views.flatMap(view => view.columns.flatMap(col => col.items)) })
+      } catch { if (open) setResult({ search, choices: [] }) }
+    }, 180)
+    return () => { open = false; clearTimeout(timer) }
+  }, [call, search, enabled])
+  return result.search === search ? result.choices : []
+}
 
 // A stale review can be reopened against the new evidence without losing the reviewer's draft.
 export function currentReview(form, item) {
