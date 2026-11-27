@@ -179,6 +179,8 @@ export interface TeamState {
   sections?: { id: string; name: string; collapsed?: boolean; color?: string; description?: string }[]
   memory?: boolean
   botGoals?: Record<string, BotGoal>
+  /** Live queue reason keyed by goal ID. It can change without a team revision. */
+  botGoalWaits?: Record<string, string>
   questions?: Record<string, Question>
   views?: Record<string, ShownView>
   secretRequests?: Record<string, SecretRequest[]>

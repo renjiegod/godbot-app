@@ -452,6 +452,8 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
   }, [call])
   const [goalPanel, setGoalPanel] = useState<string | null>(null)
   const canUseGoals = hello?.capabilities.includes('bot-goals') === true
+  const botGoal = team?.botGoals?.[sessionId]
+  const goalWaitReason = botGoal && (team?.botGoalWaits === undefined ? botGoal.reason : team.botGoalWaits[botGoal.id])
   const goalOwner = team?.bots.find(item => item.id === bot?.id)
   const canWriteGoal = !team?.readOnly && (goalOwner?.sessionId === sessionId || goalOwner?.openParts?.some(part => part.sessionId === sessionId) === true)
   const latestKey = useRef(chatKey)
@@ -611,8 +613,8 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
       {running && doingBot ? <ActionRow bot={doingBot} doing={doingText} p={p} dark={dark} conversation={conversation}
         onPress={memberWork && roomWork[0] !== undefined && workAt(roomWork[0]) !== undefined ? () => openWork(roomWork[0].botId, workAt(roomWork[0]) ?? {}) : undefined} />
         : background && bot !== undefined ? <ActionRow bot={bot} doing={t('Working in the background')} note={t('Replies when done')} p={p} dark={dark} conversation={conversation} /> : null}
-      {bot && canUseGoals && (canWriteGoal || team?.botGoals?.[sessionId]) ? <BotGoalCard key={`goal:${chatKey}`}
-        botId={bot.id} sessionId={sessionId} goal={team?.botGoals?.[sessionId]} canWrite={canWriteGoal}
+      {bot && canUseGoals && (canWriteGoal || botGoal) ? <BotGoalCard key={`goal:${chatKey}`}
+        botId={bot.id} sessionId={sessionId} goal={botGoal} waitReason={goalWaitReason} canWrite={canWriteGoal}
         open={goalPanel === chatKey} onOpen={() => setGoalPanel(chatKey)} onClose={() => setGoalPanel(null)}
         refresh={() => refreshTeam?.()} call={call} p={p} /> : null}
       <Dock question={question} sessionId={sessionId} approvals={approvals} secrets={secrets} connectorRequests={connectorRequests} botName={bot?.name} onOpenConnector={connectorId => { if (connectorCanConnectOnMobile(connectorId)) navigation.navigate('Settings', { screen: 'Connectors', params: { focusId: connectorId }, initial: false }) }} btw={btw} handoff={browserHold} view={team?.views?.[sessionId]} call={call} p={p} expanded={expandedKey} onExpand={setExpandedKey} />

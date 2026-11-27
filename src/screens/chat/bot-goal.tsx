@@ -8,7 +8,7 @@ import { type as textStyle, type Palette } from '../../ui/tokens.ts'
 type Draft = Pick<BotGoal, 'objective' | 'acceptance'> & { revision: number | null }
 
 // The same words as the goal chip in Godbot's Web composer.
-function statusOf(goal: BotGoal | undefined) {
+function statusOf(goal: BotGoal | undefined, waitReason?: string) {
   if (goal === undefined) return ''
   switch (goal.status) {
     case 'completed': return t('Goal reached')
@@ -17,21 +17,23 @@ function statusOf(goal: BotGoal | undefined) {
     case 'blocked': return t('Needs you')
     default:
       if (goal.activity === 'waiting') return t('Waiting for you')
-      return goal.activity === 'running' ? t('Working') : t('Starting soon')
+      if (goal.activity === 'running') return t('Working')
+      return waitReason ? hostText(waitReason) : t('Queued')
   }
 }
 
 type Props = {
-  botId: string; sessionId: string; goal?: BotGoal; canWrite: boolean; open: boolean
+  botId: string; sessionId: string; goal?: BotGoal; waitReason?: string; canWrite: boolean; open: boolean
   onOpen: () => void; onClose: () => void; refresh: () => void
   call: (endpoint: string, payload?: unknown) => Promise<unknown>; p: Palette
 }
 
-export function BotGoalCard({ botId, sessionId, goal, canWrite, open, onOpen, onClose, refresh, call, p }: Props) {
+export function BotGoalCard({ botId, sessionId, goal, waitReason, canWrite, open, onOpen, onClose, refresh, call, p }: Props) {
   const insets = useSafeAreaInsets()
   const [draft, setDraft] = useState<Draft | null>(null)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const status = statusOf(goal, waitReason)
   const canStart = goal === undefined || !goal.activity && ['completed', 'stopped'].includes(goal.status)
   const canEdit = goal !== undefined && !['completed', 'stopped'].includes(goal.status)
   const edit = (fresh: boolean) => setDraft({
@@ -71,7 +73,7 @@ export function BotGoalCard({ botId, sessionId, goal, canWrite, open, onOpen, on
       style={[styles.card, { backgroundColor: p.card, borderColor: p.line }]}>
       <Text style={[textStyle.small, { color: p.ink }]}>{t('Goal')}</Text>
       {goal ? <Text numberOfLines={1} style={[textStyle.small, { color: p.ink2, flex: 1 }]}>
-        {statusOf(goal) + ' · ' + goal.objective}
+        {status + ' · ' + goal.objective}
       </Text> : null}
     </Pressable>
     <Modal visible={open} onRequestClose={close} presentationStyle="pageSheet" animationType="slide">
@@ -97,8 +99,8 @@ export function BotGoalCard({ botId, sessionId, goal, canWrite, open, onOpen, on
           {goal ? <>
             <Text selectable style={[textStyle.settingsRow, { color: p.ink }]}>{goal.objective}</Text>
             {goal.acceptance ? <Text selectable style={{ color: p.ink2 }}>{t('Finished when') + ' · ' + goal.acceptance}</Text> : null}
-            <Text style={{ color: p.ink2 }}>{[statusOf(goal), goal.turns > 0 ? t('Turn {n}', { n: goal.turns }) : ''].filter(Boolean).join(' · ')}</Text>
-            {goal.reason ? <Text style={{ color: p.ink2 }}>{hostText(goal.reason)}</Text> : null}
+            <Text style={{ color: p.ink2 }}>{[status, goal.turns > 0 ? t('Turn {n}', { n: goal.turns }) : ''].filter(Boolean).join(' · ')}</Text>
+            {goal.reason && goal.activity !== 'queued' ? <Text style={{ color: p.ink2 }}>{hostText(goal.reason)}</Text> : null}
             {goal.checkpoint ? <Text selectable style={{ color: p.ink }}>{goal.checkpoint.summary}</Text> : null}
             {goal.checkpoint?.evidence ? <Text selectable style={{ color: p.ink }}>{goal.checkpoint.evidence}</Text> : null}
             {goal.checkpoint?.next ? <Text selectable style={{ color: p.ink2 }}>{t('Next step') + ' · ' + goal.checkpoint.next}</Text> : null}

@@ -1373,6 +1373,7 @@ const ZH = {
   'Waiting for earlier queued messages.': '等前面排队的消息处理完。',
   'Waiting for background work.': '等后台任务做完。',
   'Waiting for your input.': '等你回复。',
+  'Waiting for the current turn': '等待当前回合结束',
   'Waiting for the current turn and queued messages.': '等当前这一轮和排队的消息处理完。',
   'This conversation is archived or the Bot was removed.': '这个会话已归档，或 Bot 已被删除。',
   'This remote agent cannot confirm goal progress or cancellation.': '这个远程 Agent 没法确认目标进度或取消。',
