@@ -10,7 +10,7 @@ import {
   TextInput,
   View,
 } from 'react-native'
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Crypto from 'expo-crypto'
 import * as SecureStore from 'expo-secure-store'
 import { useTeam } from '../team/context.tsx'
@@ -109,16 +109,21 @@ export function WorkBoardScreen({ route, navigation }: any) {
   const supported = useRef<{ id?: string; supported: boolean } | null>(null)
   if (hello)
     supported.current = { id: computer?.hostDeviceId, supported: hello.capabilities.includes('work-board-v1') }
-  if (supported.current?.id !== computer?.hostDeviceId || !supported.current?.supported)
-    return (
-      <View style={[styles.screen, { backgroundColor: p.main }]}>
-        <SheetHeader title={t('Work board')} left={{ label: t('Back'), onPress: () => navigation.goBack() }} />
-        <Text style={{ padding: 18, color: p.ink }}>
-          {t(hello ? 'Upgrade the paired host to use the work board.' : 'Connecting…')}
-        </Text>
-      </View>
-    )
-  return <BoardContent key={computer?.hostDeviceId} route={route} navigation={navigation} />
+  const available = supported.current?.id === computer?.hostDeviceId && supported.current?.supported
+  return (
+    <SafeAreaView edges={['top']} style={[styles.screen, { backgroundColor: p.main }]}>
+      {available ? (
+        <BoardContent key={computer?.hostDeviceId} route={route} navigation={navigation} />
+      ) : (
+        <>
+          <SheetHeader title={t('Work board')} left={{ label: t('Back'), onPress: () => navigation.goBack() }} />
+          <Text style={{ padding: 18, color: p.ink }}>
+            {t(hello ? 'Upgrade the paired host to use the work board.' : 'Connecting…')}
+          </Text>
+        </>
+      )}
+    </SafeAreaView>
+  )
 }
 function BoardContent({ route, navigation }: any) {
   const { p } = useTheme(),
@@ -509,7 +514,10 @@ function BoardContent({ route, navigation }: any) {
                 {item.evidence
                   ? line(t('Evidence') + ' · v' + item.evidenceRevision + '\n' + item.evidence)
                   : null}
-                {line(item.hint, true)}
+                {item.hint &&
+                ![item.criteria, item.evidence].some((value) => value?.replace(/\s+/g, ' ').startsWith(item.hint))
+                  ? line(item.hint, true)
+                  : null}
                 {item.pending.map((p) =>
                   control(
                     t(p.type === 'question' ? 'Answer question' : 'Review approval'),
