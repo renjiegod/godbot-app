@@ -2,8 +2,10 @@ import * as Haptics from 'expo-haptics'
 import * as ImagePicker from 'expo-image-picker'
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator'
 import { useState } from 'react'
-import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import type { Bot } from '../../connection.ts'
+import { BotMentionOptions, HighlightedBotInput, useBotMentions } from '../../ui/bot-mentions.tsx'
 import { t } from '../../ui/i18n.ts'
 import { ArrowUpIcon, CloseIcon, PlusIcon, StopIcon } from '../../ui/icons.tsx'
 import { radius, shadow, type as typeScale, type Palette } from '../../ui/tokens.ts'
@@ -23,8 +25,9 @@ async function prepare(asset: ImagePicker.ImagePickerAsset): Promise<Photo> {
   return { uri: out.uri, mediaType: 'image/jpeg', data: out.base64 ?? '' }
 }
 
-export function Composer({ name, conversation, running, canStop, canAttach, onSend, onStop, p }: {
+export function Composer({ name, conversation, running, canStop, canAttach, bots, everyone, onSend, onStop, p }: {
   name: string; conversation: boolean; running: boolean; canStop: boolean; canAttach: boolean
+  bots: Bot[]; everyone: boolean
   onSend: (text: string, photos: Photo[]) => Promise<void>; onStop: () => void; p: Palette
 }) {
   const [text, setText] = useState('')
@@ -32,6 +35,8 @@ export function Composer({ name, conversation, running, canStop, canAttach, onSe
   const [preparing, setPreparing] = useState(false)
   const [pickError, setPickError] = useState<string | null>(null)
   const [focused, setFocused] = useState(false)
+  const addresses = everyone ? [...bots, { id: 'everyone', name: t('Everyone') }] : bots
+  const mentions = useBotMentions(text, setText, addresses, !focused)
   // Float above the home indicator (iOS) or the gesture bar (Android, drawn edge to
   // edge). The matching negative keyboardVerticalOffset in ChatView keeps the card
   // hugging the keyboard.
@@ -44,6 +49,7 @@ export function Composer({ name, conversation, running, canStop, canAttach, onSe
     if (!ready) return
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     const sending = photos
+    mentions.close()
     setText(''); setPhotos([])
     void onSend(draft, sending)
   }
@@ -62,8 +68,9 @@ export function Composer({ name, conversation, running, canStop, canAttach, onSe
   const multi = text.includes('\n') || text.length > 80 || photos.length > 0
   const label = t('Message {name}', { name })
   const input = (
-    <TextInput value={text} onChangeText={setText} placeholder={label} placeholderTextColor={conversation ? p.ink2 : p.ink3}
-      accessibilityLabel={label} multiline onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
+    <HighlightedBotInput {...mentions.inputProps} value={text} bots={bots} everyone={everyone} p={p}
+      placeholder={label} placeholderTextColor={conversation ? p.ink2 : p.ink3}
+      accessibilityLabel={label} multiline onFocus={() => setFocused(true)} onBlur={() => { setFocused(false); mentions.close() }}
       style={[styles.input, conversation ? styles.conversationInput : { paddingLeft: canAttach ? 2 : 6 }, { color: p.ink }]} />
   )
   const attach = canAttach ? (
@@ -86,6 +93,7 @@ export function Composer({ name, conversation, running, canStop, canAttach, onSe
       {pickError !== null ? <Text style={[typeScale.small, { color: p.danger, textAlign: 'center', marginBottom: 4 }]}>{pickError}</Text> : null}
       <View style={[conversation ? styles.conversationCard : [styles.card, { borderRadius: multi ? radius.composerLong : radius.composer }],
         { backgroundColor: p.card, borderColor: conversation && focused ? p.accent : p.line2 }]}>
+        <BotMentionOptions bots={mentions.options} choose={mentions.choose} />
         {photos.length > 0 || preparing ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={styles.photos} keyboardShouldPersistTaps="handled">
             {photos.map(photo => (
