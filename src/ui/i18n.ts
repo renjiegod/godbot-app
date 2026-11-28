@@ -573,6 +573,17 @@ const MOBILE_ZH: Record<string, string> = {
   'The Bot is working; wait for it to finish or stop it first': 'Bot 正在工作，请等它结束或先停止它',
   'Unknown part': '找不到这个会话',
   'Update Godbot on the computer to switch sessions from the phone.': '更新电脑上的 Godbot 后，才能在手机上切换会话。',
+  'Source': '来源',
+  'Last updated': '更新时间',
+  'Properties': '属性',
+  'View options': '视图与管理',
+  'Links & conversations': '关联与会话',
+  'Select': '选择',
+  'Board': '看板',
+  'List': '列表',
+  'Swimlane': '泳道',
+  'Timeline': '甘特图',
+  'Clear': '清空',
   'Opening this session…': '正在打开这个会话…',
 }
 

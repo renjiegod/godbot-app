@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ElementRef } from 'react'
 import {
   BackHandler,
-  Modal,
   Pressable,
   ScrollView,
   SectionList,
@@ -17,7 +16,8 @@ import { WorkBoardDiscussion } from './work-board-discussion.tsx'
 import { useTeam } from '../team/context.tsx'
 import { SheetHeader } from '../nav/sheet.tsx'
 import { t } from '../ui/i18n.ts'
-import { useTheme, type as typeScale } from '../ui/tokens.ts'
+import { GearIcon, SearchIcon } from '../ui/icons.tsx'
+import { radius, shadow, useTheme, type as typeScale } from '../ui/tokens.ts'
 import {
   actionNames,
   activityByAttempt,
@@ -31,7 +31,27 @@ import {
   useWorkBoard,
 } from '../../godbot/shared/work-board.js'
 import { cardGroups, priorities, timelineBars, viewDisplay } from '../../godbot/shared/work-board-planning.js'
-import { BoardManagement, BoardPlanEditor, assigneeName, boardName, type Catalog, type Display, type Filters, type PlanFields, type SavedView } from './work-board-management.tsx'
+import {
+  BoardButton,
+  BoardManagementSheet,
+  BoardPlanEditor,
+  DateChip,
+  ModalOptionPicker,
+  OwnerAvatar,
+  PriorityBadge,
+  SectionCard,
+  StatusPill,
+  assigneeName,
+  boardName,
+  phaseTone,
+  statusText,
+  tint,
+  type Catalog,
+  type Display,
+  type Filters,
+  type PlanFields,
+  type SavedView,
+} from './work-board-management.tsx'
 import { BoardArtifacts, BoardExecutions, BoardPlanningDetail, type Plan } from './work-board-detail.tsx'
 
 type Pair = { id: string; name: string }
@@ -93,29 +113,95 @@ type Form = {
   fields?: PlanFields
   commentId?: string
 }
-type Options = { name: string; options: [string, string][]; select: (v: string) => void }
+type Options = { name: string; options: [string, string][]; select: (v: string) => void; current?: string }
 const name = (dict: Record<string, string>, key: string) => t(dict[key] ?? key)
 const tabNames = { all: 'All work', mine: 'Needs my action', history: 'History' }
 const listNames = (dict: Record<string, string>): [string, string][] =>
   Object.entries(dict).map(([k, v]) => [k, t(v)])
 const pairs = (rows: Pair[]): [string, string][] => rows.map((r) => [r.id, r.name])
+const SECONDARY_OPS = new Set(['edit-fields', 'archive', 'reopen', 'withdraw', 'transfer'])
+const DANGER_OPS = new Set(['reject', 'cancel'])
+
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  body: { paddingHorizontal: 14, paddingBottom: 20, gap: 8 },
-  row: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
-  card: { padding: 12, borderWidth: StyleSheet.hairlineWidth, borderRadius: 9, marginBottom: 6, gap: 5 },
-  control: { minHeight: 48, justifyContent: 'center', paddingHorizontal: 10, borderRadius: 7 },
+  body: { paddingHorizontal: 14, paddingBottom: 24, gap: 10 },
+  row: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 7 },
+  segTabs: { flexDirection: 'row', borderRadius: radius.pill, padding: 3, gap: 3 },
+  segTab: {
+    flex: 1,
+    minHeight: 38,
+    borderRadius: radius.pill,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    gap: 5,
+  },
+  tabBadge: { paddingHorizontal: 6, paddingVertical: 1, borderRadius: radius.pill },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  searchWrap: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 42,
+    borderRadius: radius.pill,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
+    gap: 7,
+  },
+  searchInput: { flex: 1, fontSize: 14, paddingVertical: 6 },
+  toolsTrigger: {
+    minHeight: 42,
+    minWidth: 42,
+    paddingHorizontal: 12,
+    borderRadius: radius.pill,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  chipsRow: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 2 },
+  card: {
+    flexDirection: 'row',
+    borderRadius: radius.card,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginBottom: 9,
+    overflow: 'hidden',
+  },
+  cardStripe: { width: 4 },
+  cardBody: { flex: 1, padding: 12, gap: 7 },
+  cardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  idChip: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.tag },
+  cardFoot: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    paddingTop: 6,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  ownerRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 },
+  propGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  propCell: { width: '46%', minWidth: 130, gap: 3 },
+  footer: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  overlay: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0 },
   field: {
     minHeight: 46,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 7,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
+    borderWidth: 1,
+    borderRadius: radius.input,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
   },
-  footer: { padding: 10, borderTopWidth: StyleSheet.hairlineWidth },
-  overlay: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0 },
-  sheet: { maxHeight: '78%', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 14 },
-  scrim: { flex: 1, justifyContent: 'flex-end', backgroundColor: '#0005' },
 })
 
 export function WorkBoardScreen({ route, navigation }: any) {
@@ -141,7 +227,7 @@ export function WorkBoardScreen({ route, navigation }: any) {
   )
 }
 function BoardContent({ route, navigation }: any) {
-  const { p } = useTheme(),
+  const { p, dark } = useTheme(),
     insets = useSafeAreaInsets()
   const { computer, call, onFeed, online, team, hello } = useTeam()
   const discussionsSupported = useRef(false)
@@ -157,6 +243,8 @@ function BoardContent({ route, navigation }: any) {
   const [initialRun, setInitialRun] = useState<string | undefined>(undefined)
   const [quote, setQuote] = useState<string | undefined>(undefined)
   const [selecting, setSelecting] = useState(false)
+  const [bulkOpen, setBulkOpen] = useState(false)
+  const [toolsOpen, setToolsOpen] = useState(false)
   const [checked, setChecked] = useState(() => new Map<string, string>())
   const [viewError, setViewError] = useState('')
   const loadedView = useRef('')
@@ -234,6 +322,10 @@ function BoardContent({ route, navigation }: any) {
       setOpts(null)
       return true
     }
+    if (toolsOpen) {
+      setToolsOpen(false)
+      return true
+    }
     if (form) {
       setForm(null)
       return true
@@ -248,7 +340,7 @@ function BoardContent({ route, navigation }: any) {
       return true
     }
     return false
-  }, [opts, form, selected])
+  }, [opts, toolsOpen, form, selected])
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => navigation.isFocused() && close())
     return () => sub.remove()
@@ -268,28 +360,25 @@ function BoardContent({ route, navigation }: any) {
     setTrail(false)
     setExpandedAttempt(null)
   }
-  const select = (title: string, options: [string, string][], setter: (v: string) => void) =>
+  const select = (title: string, options: [string, string][], setter: (v: string) => void, current?: string) =>
     setOpts({
       name: title,
       options,
+      current,
       select: (value) => {
         setter(value)
         setOpts(null)
       },
     })
-  function control(title: string, press: () => void, off = false, primary = false, key = title) {
+  function control(title: string, press: () => void, off = false, primary = false, key = title, danger = false) {
     return (
-      <Pressable
+      <BoardButton
         key={key}
-        accessibilityRole="button"
-        accessibilityLabel={title}
-        disabled={off}
-        accessibilityState={{ disabled: off }}
+        title={title}
         onPress={press}
-        style={[styles.control, { opacity: off ? 0.5 : 1, backgroundColor: primary ? p.accent : p.hover }]}
-      >
-        <Text style={[typeScale.small, { color: primary ? p.accentInk : p.ink }]}>{title}</Text>
-      </Pressable>
+        disabled={off}
+        variant={primary ? 'primary' : danger ? 'danger' : 'secondary'}
+      />
     )
   }
   const line = (s: string, small = false) => (
@@ -382,21 +471,41 @@ function BoardContent({ route, navigation }: any) {
   const plot = useMemo(() => display.layout === 'gantt' ? timelineBars(baseColumns.flatMap(column => column.items)) : null,
     [baseColumns, display.layout])
   const highlights = useMemo(() => new Map((plot?.bars ?? []).map(bar => [bar.card.id, bar])), [plot])
-  const filterButton = (field: string, title: string, options: [string, string][]) =>
-    control(
-      options.find((o) => o[0] === filters[field])?.[1] ?? t(title),
-      () => select(t(title), [['', t(title)], ...options], (v) => update(field, v)),
-      false,
-      !!filters[field],
-      field,
+  const filterChip = (field: string, title: string, options: [string, string][]) => {
+    const active = !!filters[field]
+    const current = options.find((o) => o[0] === filters[field])?.[1] ?? t(title)
+    return (
+      <BoardButton
+        key={field}
+        compact
+        selected={active}
+        title={current}
+        onPress={() => select(t(title), [['', t(title)], ...options], (v) => update(field, v), filters[field] ?? '')}
+      />
     )
+  }
+  const resetAll = () => {
+    setViewId('')
+    setFilters({ ...defaultFilters })
+    setPhase('')
+  }
+  const secondaryActive = [
+    filters.assignee, filters.statusId, filters.priority, filters.label, filters.startBefore, filters.dueBefore,
+    filters.property, filters.sort && filters.sort !== 'priority' ? filters.sort : '',
+    display.groupBy !== 'phase' ? display.groupBy : '', viewId,
+  ].filter(Boolean).length
+  const anyFilter = !!phase || Object.entries(filters).some(([k, v]) => k !== 'tab' && k !== 'sort' && Boolean(v))
   const report = viewError || state.error || (!online ? t('Reconnecting…') : '')
   const field = (title: string, k: 'title' | 'criteria' | 'text', multi = false) => (
-    <View key={k}>
-      {line(t(title), true)}
+    <View key={k} style={{ gap: 5 }}>
+      <Text style={[typeScale.caption, { color: p.ink2, fontWeight: '500' }]}>{t(title)}</Text>
       <TextInput
         accessibilityLabel={t(title)}
-        style={[styles.field, { color: p.ink, borderColor: p.line, minHeight: multi ? 80 : 46 }]}
+        placeholderTextColor={p.ink3}
+        style={[
+          styles.field,
+          { color: p.ink, borderColor: p.line2, backgroundColor: p.card, minHeight: multi ? 88 : 46, textAlignVertical: multi ? 'top' : 'center' },
+        ]}
         value={form?.[k] ?? ''}
         onChangeText={(v) => edit(k, v)}
         multiline={multi}
@@ -420,6 +529,41 @@ function BoardContent({ route, navigation }: any) {
     (form.op === 'dispatch' && (!form.owner || !form.criteria.trim())) ||
     (form.op === 'transfer' && !form.owner) ||
     ((['reject', 'note'].includes(form.op) || !!form.child) && !form.text.trim())
+
+  const renderFormFooter = () => (
+    <View style={[styles.footer, { backgroundColor: p.card, borderTopColor: p.line }, shadow(2)]}>
+      <View style={{ flex: 1, flexDirection: 'row', gap: 8, justifyContent: 'flex-end' }}>
+        <BoardButton title={t('Cancel')} onPress={close} />
+        <BoardButton variant="primary" title={t('Confirm')} disabled={invalid} onPress={() => void submit()} />
+      </View>
+    </View>
+  )
+
+  const renderDetailFooter = (d: Item) => {
+    const secondary = d.source !== 'run' ? d.actions.filter(op => SECONDARY_OPS.has(op)) : []
+    const primary = d.source !== 'run' ? d.actions.filter(op => !SECONDARY_OPS.has(op)) : []
+    return (
+      <View style={[styles.footer, { backgroundColor: p.card, borderTopColor: p.line }, shadow(2)]}>
+        <View style={[styles.row, { flex: 1 }]}>
+          {managementSupported.current ? <BoardButton variant="soft" title={t('Edit work item')} disabled={disabled} onPress={() => start('edit-fields', d)} /> : null}
+          {secondary.map(op => control(name(actionNames, op), () => start(op, d), disabled, false, op))}
+        </View>
+        {primary.length ? (
+          <View style={styles.row}>
+            {primary.map(op => control(
+              name(actionNames, op),
+              () => start(op, d),
+              disabled,
+              ['dispatch', 'approve', 'complete'].includes(op),
+              op,
+              DANGER_OPS.has(op),
+            ))}
+          </View>
+        ) : null}
+      </View>
+    )
+  }
+
   return (
     <View style={[styles.screen, { backgroundColor: p.main, paddingBottom: insets.bottom }]}>
       <View style={[styles.screen, selected || form ? { display: 'none' } : null]}>
@@ -429,6 +573,7 @@ function BoardContent({ route, navigation }: any) {
           right={{
             label: t('New work item'),
             disabled,
+            strong: true,
             onPress: () => start('create'),
           }}
         />
@@ -438,113 +583,218 @@ function BoardContent({ route, navigation }: any) {
           keyExtractor={(c) => c.id}
           stickySectionHeadersEnabled={false}
           ListHeaderComponent={
-            <View style={{ gap: 7 }}>
-              <View style={styles.row}>
-                {Object.entries(tabNames).map(([id, n]) =>
-                  control(
-                    t(n) + ' ' + (board?.counts[id] ?? '…'),
-                    () => {
-                      update('tab', id)
-                      setPhase('')
-                    },
-                    false,
-                    filters.tab === id,
-                    id,
-                  ),
-                )}
+            <View style={{ gap: 9, paddingTop: 10 }}>
+              <View style={[styles.segTabs, { backgroundColor: p.bubble }]}>
+                {Object.entries(tabNames).map(([id, n]) => {
+                  const active = filters.tab === id
+                  const count = board?.counts[id] ?? '…'
+                  return (
+                    <Pressable
+                      key={id}
+                      accessibilityRole="tab"
+                      accessibilityLabel={`${t(n)} ${count}`}
+                      accessibilityState={{ selected: active }}
+                      onPress={() => {
+                        update('tab', id)
+                        setPhase('')
+                      }}
+                      style={[
+                        styles.segTab,
+                        active && [
+                          { backgroundColor: p.card },
+                          shadow(1),
+                          dark && { borderWidth: StyleSheet.hairlineWidth, borderColor: p.line2 },
+                        ],
+                      ]}
+                    >
+                      <Text numberOfLines={1} style={[typeScale.small, { color: active ? p.ink : p.ink2, fontWeight: active ? '600' : '500', flexShrink: 1 }]}>
+                        {t(n)}
+                      </Text>
+                      <View style={[styles.tabBadge, { backgroundColor: active ? tint(p.accent, 0.14) : p.tagBg }]}>
+                        <Text style={[typeScale.caption, { color: active ? p.accent : p.ink2, fontWeight: '600' }]}>
+                          {count}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  )
+                })}
               </View>
-              <TextInput
-                accessibilityLabel={t('Search work and comments')}
-                placeholder={t('Search work and comments')}
-                placeholderTextColor={p.ink3}
-                value={filters.search}
-                onChangeText={(v) => update('search', v)}
-                style={[styles.field, { borderColor: p.line, color: p.ink }]}
-              />
+              <View style={styles.searchRow}>
+                <View style={[styles.searchWrap, { backgroundColor: p.card, borderColor: p.line2 }]}>
+                  <SearchIcon size={16} color={p.ink3} />
+                  <TextInput
+                    accessibilityLabel={t('Search work and comments')}
+                    placeholder={t('Search work and comments')}
+                    placeholderTextColor={p.ink3}
+                    value={filters.search}
+                    onChangeText={(v) => update('search', v)}
+                    style={[styles.searchInput, { color: p.ink }]}
+                  />
+                  {filters.search ? (
+                    <Pressable accessibilityRole="button" accessibilityLabel={t('Clear')} onPress={() => update('search', '')} hitSlop={8}>
+                      <Text style={{ color: p.ink2, fontSize: 15, paddingHorizontal: 4 }}>×</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t('View options')}
+                  onPress={() => setToolsOpen(true)}
+                  style={[
+                    styles.toolsTrigger,
+                    {
+                      backgroundColor: secondaryActive > 0 ? tint(p.accent, 0.12) : p.card,
+                      borderColor: secondaryActive > 0 ? p.accent : p.line2,
+                    },
+                  ]}
+                >
+                  <GearIcon size={17} color={secondaryActive > 0 ? p.accent : p.ink2} />
+                  {secondaryActive > 0 ? (
+                    <Text style={[typeScale.caption, { color: p.accent, fontWeight: '600' }]}>{secondaryActive}</Text>
+                  ) : null}
+                </Pressable>
+              </View>
               <ScrollView
                 horizontal
                 keyboardShouldPersistTaps="handled"
                 showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.row}
+                contentContainerStyle={styles.chipsRow}
               >
-                {filterButton('owner', 'All owners', [
+                <BoardButton
+                  compact
+                  selected={!!phase}
+                  title={phase ? name(phaseNames, phase) : t('All statuses')}
+                  onPress={() => select(t('All statuses'), [['', t('All statuses')], ...listNames(phaseNames)], setPhase, phase)}
+                />
+                {filterChip('owner', 'All owners', [
                   ['unassigned', t('Unassigned')],
                   ...pairs(board?.bots ?? []),
                 ])}
-                {filterButton('room', 'All groups', pairs(board?.rooms ?? []))}
-                {filterButton('source', 'All sources', listNames(sourceNames))}
-                {filterButton('section', 'All sections', pairs(team?.sections ?? []))}
-                {control(phase ? name(phaseNames, phase) : t('All statuses'), () =>
-                  select(t('All statuses'), [['', t('All statuses')], ...listNames(phaseNames)], setPhase),
-                )}
+                {filterChip('room', 'All groups', pairs(board?.rooms ?? []))}
+                {filterChip('source', 'All sources', listNames(sourceNames))}
+                {filterChip('section', 'All sections', pairs(team?.sections ?? []))}
+                {anyFilter ? <BoardButton compact variant="soft" title={t('Clear filters')} onPress={resetAll} /> : null}
               </ScrollView>
-              {managementSupported.current && board?.catalog ? <BoardManagement catalog={board.catalog} filters={filters}
-                changeFilters={patch => setFilters(old => ({ ...old, ...patch }))} display={display} setDisplay={setDisplay}
-                choose={select} selectedView={viewId} applyView={applyView} readOnly={disabled} selecting={selecting}
-                toggleSelecting={() => { setSelecting(!selecting); setChecked(new Map()) }}
-                selected={Array.from(checked, ([id, version]) => ({ id, version }))}
-                refresh={state.refresh} onBulk={rejected => setChecked(old => {
-                  const retained = new Map<string, string>()
-                  for (const { id } of rejected) {
-                    const version = old.get(id)
-                    if (version) retained.set(id, version)
-                  }
-                  return retained
-                })} /> : null}
+              {selecting ? (
+                <View style={[styles.row, { padding: 10, borderRadius: radius.row, backgroundColor: tint(p.accent, 0.1) }]}>
+                  <Text style={[typeScale.small, { color: p.ink, fontWeight: '600', flex: 1 }]}>
+                    {t('Selected') + ': ' + checked.size}
+                  </Text>
+                  {checked.size ? <BoardButton compact variant="primary" title={t('Edit selected ({count})', { count: checked.size })}
+                    disabled={disabled} onPress={() => setBulkOpen(true)} /> : null}
+                  <BoardButton compact title={t('Finish selecting')} onPress={() => { setSelecting(false); setChecked(new Map()) }} />
+                </View>
+              ) : null}
               {plot?.first ? line(plot.first + ' → ' + plot.last, true) : null}
             </View>
           }
           renderSectionHeader={({ section }) => (
-            <Text accessibilityRole="header" style={[typeScale.headerTitle, { color: p.ink, marginVertical: 8 }]}>
-              {section.title || name(phaseIcons, section.phase) + ' ' + name(phaseNames, section.phase)} · {section.total}
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, marginBottom: 6 }}>
+              <Text style={[typeScale.small, { color: phaseTone(section.phase, p), fontWeight: '700' }]}>
+                {name(phaseIcons, section.phase)}
+              </Text>
+              <Text accessibilityRole="header" style={[typeScale.headerTitle, { color: p.ink, flex: 1 }]}>
+                {section.title || name(phaseNames, section.phase)}
+              </Text>
+              <View style={[styles.tabBadge, { backgroundColor: p.tagBg }]}>
+                <Text style={[typeScale.caption, { color: p.ink2, fontWeight: '600' }]}>{section.total}</Text>
+              </View>
+            </View>
           )}
           renderSectionFooter={({ section }) =>
-            section.next ? control(t('Load more'), () => void state.more(section)) : null
+            section.next ? <BoardButton variant="soft" title={t('Load more')} onPress={() => void state.more(section)} /> : null
           }
           ListFooterComponent={display.groupBy !== 'phase' || display.layout === 'swimlane' ? <View style={styles.row}>
             {baseColumns.filter(column => column.next).map(column => control(t('Load more') + ' · ' + name(phaseNames, column.phase),
               () => void state.more(column), false, false, column.phase))}
           </View> : undefined}
-          renderItem={({ item: c }) => (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={c.id + ' ' + c.title + ' ' + cardOwner(c) + ' ' + name(markNames, c.mark)}
-              accessibilityState={{ selected: checked.has(c.id) }}
-              onPress={() => selecting ? toggle(c) : pick(c.id)}
-              style={[styles.card, { backgroundColor: p.card, borderColor: checked.has(c.id) ? p.accent : p.line }]}
-            >
-              {line(c.id + (c.priority ? ' · ' + t((priorities as Record<string, string>)[c.priority]) : ''), true)}
-              <Text numberOfLines={2} style={[typeScale.settingsRow, { color: p.ink, fontWeight: '600' }]}>
-                {c.title}
-              </Text>
-              <Text numberOfLines={2} style={[typeScale.small, { color: p.ink2 }]}>
-                {c.hint}
-              </Text>
-              {line(cardOwner(c) + ' · ' +
-                (c.statusId ? boardName(c.statusId, 'status', board?.catalog) : name(markNames, c.mark)), true)}
-              {c.labels?.length || c.dueDate ? line([...(c.labels ?? []), c.dueDate].filter(Boolean).join(' · '), true) : null}
-              {display.layout === 'table' ? line([c.startDate, c.dueDate, name(phaseNames, c.phase)].filter(Boolean).join(' · '), true) : null}
-              {display.layout === 'swimlane' ? line(name(phaseNames, c.phase), true) : null}
-              {display.layout === 'gantt' && highlights.has(c.id) ? <>
-                {line([c.startDate, c.dueDate].filter(Boolean).join(' – '), true)}
-                <View style={{ height: 9, backgroundColor: p.hover, borderRadius: 5, overflow: 'hidden' }}>
-                  <View style={{ height: 9, backgroundColor: p.accent, marginLeft: (100 * (highlights.get(c.id)?.left ?? 0)) + '%',
-                    width: (100 * (highlights.get(c.id)?.width ?? 0)) + '%' } as never} />
+          renderItem={({ item: c }) => {
+            const isPicked = checked.has(c.id)
+            const tone = phaseTone(c.phase, p)
+            return (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={c.id + ' ' + c.title + ' ' + cardOwner(c) + ' ' + name(markNames, c.mark)}
+                accessibilityState={{ selected: isPicked }}
+                onPress={() => selecting ? toggle(c) : pick(c.id)}
+                style={({ pressed }) => [
+                  styles.card,
+                  shadow(1),
+                  {
+                    backgroundColor: pressed ? p.hover : p.card,
+                    borderColor: isPicked ? p.accent : p.line,
+                    borderWidth: isPicked ? 1.5 : StyleSheet.hairlineWidth,
+                  },
+                ]}
+              >
+                <View style={[styles.cardStripe, { backgroundColor: tone }]} />
+                <View style={styles.cardBody}>
+                  <View style={styles.cardTop}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <View style={[styles.idChip, { backgroundColor: p.bubble }]}>
+                        <Text style={[typeScale.caption, { color: p.ink2, fontWeight: '600' }]}>{c.id}</Text>
+                      </View>
+                      <Text style={[typeScale.caption, { color: p.ink3 }]}>{name(sourceNames, c.source)}</Text>
+                    </View>
+                    <PriorityBadge priority={c.priority} />
+                  </View>
+                  <Text numberOfLines={2} style={[typeScale.rowName, { color: p.ink, fontWeight: '600' }]}>
+                    {c.title}
+                  </Text>
+                  {c.hint ? (
+                    <Text numberOfLines={2} style={[typeScale.small, { color: p.ink2 }]}>
+                      {c.hint}
+                    </Text>
+                  ) : null}
+                  {c.labels?.length || c.dueDate || c.startDate ? (
+                    <View style={styles.row}>
+                      {c.dueDate ? <DateChip value={c.dueDate} phase={c.phase} /> : c.startDate ? <DateChip value={c.startDate} phase={c.phase} prefix="start" /> : null}
+                      {(c.labels ?? []).slice(0, 3).map((tag, i) => (
+                        <View key={i} style={[styles.idChip, { backgroundColor: p.tagBg }]}>
+                          <Text style={[typeScale.caption, { color: p.tagInk }]}>{tag}</Text>
+                        </View>
+                      ))}
+                      {(c.labels?.length ?? 0) > 3 ? (
+                        <View style={[styles.idChip, { backgroundColor: p.tagBg }]}>
+                          <Text style={[typeScale.caption, { color: p.tagInk }]}>+{(c.labels?.length ?? 0) - 3}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  ) : null}
+                  <View style={[styles.cardFoot, { borderTopColor: p.line }]}>
+                    <View style={styles.ownerRow}>
+                      <OwnerAvatar target={c} bots={team?.bots ?? []} rooms={team?.rooms ?? []} catalog={board?.catalog} size={20} />
+                      <Text numberOfLines={1} style={[typeScale.caption, { color: p.ink2, flexShrink: 1 }]}>
+                        {cardOwner(c)}
+                      </Text>
+                    </View>
+                    <StatusPill phase={c.phase} label={statusText(c, board?.catalog)} />
+                  </View>
+                  {display.layout === 'table' ? line([c.startDate, c.dueDate, name(phaseNames, c.phase)].filter(Boolean).join(' · '), true) : null}
+                  {display.layout === 'swimlane' ? line(name(phaseNames, c.phase), true) : null}
+                  {display.layout === 'gantt' && highlights.has(c.id) ? <>
+                    {line([c.startDate, c.dueDate].filter(Boolean).join(' – '), true)}
+                    <View style={{ height: 8, backgroundColor: p.bubble, borderRadius: 4, overflow: 'hidden' }}>
+                      <View style={{
+                        height: 8, backgroundColor: tone, borderRadius: 4,
+                        marginLeft: (100 * (highlights.get(c.id)?.left ?? 0)) + '%',
+                        width: (100 * (highlights.get(c.id)?.width ?? 0)) + '%',
+                      } as never} />
+                    </View>
+                  </> : null}
                 </View>
-              </> : null}
-            </Pressable>
-          )}
+              </Pressable>
+            )
+          }}
           ListEmptyComponent={
-            <View>
-              {line(t(board ? (freshBoard ? 'No work items yet' : 'No matching work items') : 'Loading…'))}
-              {board && !freshBoard
-                ? control(t('Clear filters'), () => {
-                    setFilters({ ...defaultFilters })
-                    setPhase('')
-                  })
-                : null}
-            </View>
+            <SectionCard>
+              <View style={{ alignItems: 'center', gap: 10, paddingVertical: 14 }}>
+                {line(t(board ? (freshBoard ? 'No work items yet' : 'No matching work items') : 'Loading…'))}
+                {board && !freshBoard
+                  ? <BoardButton title={t('Clear filters')} onPress={resetAll} />
+                  : null}
+              </View>
+            </SectionCard>
           }
         />
       </View>
@@ -554,90 +804,108 @@ function BoardContent({ route, navigation }: any) {
             title={form ? name(actionNames, form.op) : (item?.id ?? t('Work item'))}
             left={{ label: t('Back'), onPress: close }}
           />
-          <ScrollView ref={detailScroll} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.body}>
+          <ScrollView ref={detailScroll} keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.body, { paddingTop: 12 }]}>
             {form ? (
               <>
                 {['create', 'edit', 'edit-fields', 'dispatch'].includes(form.op) ? (
-                  <>
+                  <SectionCard>
                     {field('Title', 'title')}
                     {field('Acceptance criteria', 'criteria', true)}
-                    {control(t('Priority') + ' · ' + t((priorities as Record<string, string>)[form.priority]), () =>
-                      select(t('Priority'), listNames(priorities), v => edit('priority', Number(v))),
-                    )}
-                  </>
+                    <BoardButton title={t('Priority') + ' · ' + t((priorities as Record<string, string>)[form.priority])}
+                      onPress={() => select(t('Priority'), listNames(priorities), v => edit('priority', Number(v)), String(form.priority))} />
+                  </SectionCard>
                 ) : null}
                 {(['create', 'edit', 'dispatch', 'transfer'].includes(form.op) || form.op === 'edit-fields' && form.base?.source === 'draft')
-                  ? control(t('Owner') + ' · ' + (form.owner.includes('/') ? assigneeName(form.owner, board?.catalog) : owner(form.owner)), () =>
-                      select(t('Owner'), [['', t('Unassigned')], ...(managementSupported.current && board?.catalog
-                        ? board.catalog.assignees.filter(a => !['dispatch', 'transfer'].includes(form.op) || a.kind !== 'person')
-                          .map((a): [string, string] => [a.kind === 'bot' ? a.id.slice(4) : a.id, t(a.name)])
-                        : pairs(board?.bots ?? []))], v => edit('owner', v)))
+                  ? <SectionCard>
+                      <BoardButton title={t('Owner') + ' · ' + (form.owner.includes('/') ? assigneeName(form.owner, board?.catalog) : owner(form.owner))}
+                        onPress={() => select(t('Owner'), [['', t('Unassigned')], ...(managementSupported.current && board?.catalog
+                          ? board.catalog.assignees.filter(a => !['dispatch', 'transfer'].includes(form.op) || a.kind !== 'person')
+                            .map((a): [string, string] => [a.kind === 'bot' ? a.id.slice(4) : a.id, t(a.name)])
+                          : pairs(board?.bots ?? []))], v => edit('owner', v), form.owner)} />
+                    </SectionCard>
                   : null}
                 {managementSupported.current && ['create', 'edit-fields'].includes(form.op)
-                  ? <BoardPlanEditor key={form.base?.id ?? 'create'} fields={form.fields ?? {}} catalog={board?.catalog}
-                    choose={select} item={form.base} change={data => setForm(old => old ? { ...old, fields: { ...old.fields, ...data } } : null)} />
+                  ? <SectionCard>
+                      <BoardPlanEditor key={form.base?.id ?? 'create'} fields={form.fields ?? {}} catalog={board?.catalog}
+                        choose={select} item={form.base} change={data => setForm(old => old ? { ...old, fields: { ...old.fields, ...data } } : null)} />
+                    </SectionCard>
                   : null}
 
                 {form.op === 'dispatch'
-                  ? line(
-                      t(
-                        form.origin?.botId === form.owner
-                          ? 'Dispatch to the source conversation'
-                          : 'Dispatch to a dedicated task conversation',
-                      ),
-                      true,
-                    )
+                  ? <View style={{ padding: 11, borderRadius: radius.row, borderLeftWidth: 3, borderLeftColor: p.accent, backgroundColor: tint(p.accent, 0.1) }}>
+                      <Text style={[typeScale.small, { color: p.ink }]}>
+                        {t(form.origin?.botId === form.owner ? 'Dispatch to the source conversation' : 'Dispatch to a dedicated task conversation')}
+                      </Text>
+                    </View>
                   : null}
                 {['approve', 'reject'].includes(form.op)
-                  ? line(
-                      t('Evidence') +
-                        ' · v' +
-                        (form.child?.evidenceRevision ?? form.base?.evidenceRevision) +
-                        '\n' +
-                        (form.child?.evidence ?? form.base?.evidence ?? ''),
-                    )
+                  ? <SectionCard title={t('Evidence')} badge={'v' + (form.child?.evidenceRevision ?? form.base?.evidenceRevision)}>
+                      {line(form.child?.evidence ?? form.base?.evidence ?? '')}
+                    </SectionCard>
                   : null}
                 {form.op === 'note'
-                  ? line(t('This posts a message to the source group and mentions the owner.'))
+                  ? line(t('This posts a message to the source group and mentions the owner.'), true)
                   : null}
                 {['approve', 'reject', 'note'].includes(form.op)
-                  ? field(form.op === 'note' ? 'Message to the group' : 'Review feedback', 'text', true)
+                  ? <SectionCard>{field(form.op === 'note' ? 'Message to the group' : 'Review feedback', 'text', true)}</SectionCard>
                   : null}
                 {stale && updated ? (
-                  <>
-                    {line(
-                      t('Evidence changed from v{old} to v{current}.', {
+                  <SectionCard>
+                    <Text style={[typeScale.small, { color: p.danger }]}>
+                      {t('Evidence changed from v{old} to v{current}.', {
                         old: form.child?.evidenceRevision ?? form.base?.evidenceRevision ?? '',
                         current: updated.child?.evidenceRevision ?? updated.base?.evidenceRevision ?? '',
-                      }),
-                    )}
-                    {control(t('Review current evidence'), () => setForm(updated), disabled)}
-                  </>
+                      })}
+                    </Text>
+                    <BoardButton variant="primary" title={t('Review current evidence')} disabled={disabled} onPress={() => setForm(updated)} />
+                  </SectionCard>
                 ) : stale ? (
-                  line(t('This work item changed. Reopen the action to review the current evidence.'))
+                  <SectionCard>
+                    <Text style={[typeScale.small, { color: p.danger }]}>
+                      {t('This work item changed. Reopen the action to review the current evidence.')}
+                    </Text>
+                  </SectionCard>
                 ) : null}
               </>
             ) : item ? (
               <>
-                <Text accessibilityRole="header" style={[typeScale.headerTitle, { color: p.ink }]}>
-                  {item.title}
-                </Text>
-                {line(
-                  name(markNames, item.mark) + ' · ' + cardOwner(item) + ' · ' + name(sourceNames, item.source),
-                  true,
-                )}
-                <View style={styles.row} accessibilityRole="tablist">
+                <SectionCard>
+                  <View style={styles.row}>
+                    <StatusPill phase={item.phase} label={statusText(item, board?.catalog)} />
+                    <PriorityBadge priority={item.priority} showNormal />
+                    <View style={[styles.idChip, { backgroundColor: p.tagBg }]}>
+                      <Text style={[typeScale.caption, { color: p.tagInk }]}>{name(sourceNames, item.source)}</Text>
+                    </View>
+                  </View>
+                  <Text accessibilityRole="header" style={[typeScale.headerTitle, { color: p.ink, fontSize: 19, lineHeight: 26 }]}>
+                    {item.title}
+                  </Text>
+                  <View style={styles.row}>
+                    <OwnerAvatar target={item} bots={team?.bots ?? []} rooms={team?.rooms ?? []} catalog={board?.catalog} size={22} />
+                    <Text style={[typeScale.small, { color: p.ink2, fontWeight: '500' }]}>{cardOwner(item)}</Text>
+                    <Text style={[typeScale.caption, { color: p.ink3, marginLeft: 'auto' }]}>
+                      {new Date(item.updated).toLocaleString()}
+                    </Text>
+                  </View>
+                </SectionCard>
+                <View style={[styles.segTabs, { backgroundColor: p.bubble }]} accessibilityRole="tablist">
                   {(managementSupported.current ? ['Details', 'Discussion', 'Runs', 'Artifacts'] : ['Details', 'Discussion']).map(tab => {
                     const active = tab === (discussion ? 'Discussion' : extra === 'runs' ? 'Runs' : extra === 'artifacts' ? 'Artifacts' : 'Details')
-                    return <Pressable key={tab} accessibilityRole="tab" accessibilityState={{ selected: active }}
-                      onPress={() => {
-                        setDiscussion(tab === 'Discussion')
-                        setExtra(tab === 'Runs' ? 'runs' : tab === 'Artifacts' ? 'artifacts' : '')
-                        setInitialRun(undefined)
-                        if (tab !== 'Discussion') { setCommentFocus(undefined); setQuote(undefined) }
-                      }} style={[styles.control, { backgroundColor: active ? p.hover : p.main }]}>
-                      <Text style={[typeScale.settingsRow, { color: active ? p.accent : p.ink2 }]}>{t(tab)}</Text>
-                    </Pressable>
+                    return (
+                      <Pressable key={tab} accessibilityRole="tab" accessibilityState={{ selected: active }}
+                        onPress={() => {
+                          setDiscussion(tab === 'Discussion')
+                          setExtra(tab === 'Runs' ? 'runs' : tab === 'Artifacts' ? 'artifacts' : '')
+                          setInitialRun(undefined)
+                          if (tab !== 'Discussion') { setCommentFocus(undefined); setQuote(undefined) }
+                        }}
+                        style={[
+                          styles.segTab,
+                          active && [{ backgroundColor: p.card }, shadow(1), dark && { borderWidth: StyleSheet.hairlineWidth, borderColor: p.line2 }],
+                        ]}>
+                        <Text style={[typeScale.small, { color: active ? p.ink : p.ink2, fontWeight: active ? '600' : '500' }]}>{t(tab)}</Text>
+                      </Pressable>
+                    )
                   })}
                 </View>
                 <View onLayout={event => { discussionOffset.current = event.nativeEvent.layout.y }}
@@ -658,117 +926,217 @@ function BoardContent({ route, navigation }: any) {
                   initialRun={initialRun} readOnly={disabled} open={original} openComment={openComment}
                   modify={async change => Boolean(await state.act({ ...change, id: item.id, version: item.version }, Crypto.randomUUID))} /> : null}
                 {extra === 'artifacts' ? <BoardArtifacts key={item.id} id={item.id} choose={select} openComment={openComment} /> : null}
-                <View style={discussion || extra ? { display: 'none' } : { gap: 8 }}>
-                {managementSupported.current ? <BoardPlanningDetail key={item.id} item={item} readOnly={disabled} catalog={board?.catalog}
-                  open={pick} openComment={openComment} annotate={text => { setQuote(text); setDiscussion(true); setExtra('') }}
-                  add={() => start('create', undefined, undefined, { parent: item.id })} /> : null}
-                {line(t('Acceptance criteria') + '\n' + (item.criteria || '—'))}
-                {item.evidence
-                  ? line(t('Evidence') + ' · v' + item.evidenceRevision + '\n' + item.evidence)
-                  : null}
-                {item.hint &&
-                ![item.criteria, item.evidence].some((value) => value?.replace(/\s+/g, ' ').startsWith(item.hint))
-                  ? line(item.hint, true)
-                  : null}
-                {item.pending.map((p) =>
-                  control(
-                    t(p.type === 'question' ? 'Answer question' : 'Review approval'),
-                    async () => {
-                      if (p.botId && p.sessionId)
-                        await call('bot-open-part', { botId: p.botId, sessionId: p.sessionId })
-                          .then(() => navigation.push('Chat', { kind: 'bot', id: p.botId }))
-                          .catch(() => void state.refresh())
-                      else if (p.roomId) navigation.push('Chat', { kind: 'room', id: p.roomId })
-                    },
-                    disabled,
-                    false,
-                    p.id,
-                  ),
-                )}
-                {item.dependencies.map((d) => control(d.id + ' · ' + d.title, () => pick(d.id)))}
-                {item.origin ? control(t('Open source conversation'), () => original(item.origin)) : null}
-                {item.execution ? control(t('Open execution conversation'), () => original(item.execution)) : null}
-                {item.events.length
-                  ? control(t('Activity') + ' · ' + item.events.length, () => setTrail(!trail))
-                  : null}
-                {trail
-                  ? activityByAttempt(item.events).map((group: { attempt: number; events: Item['events'] }) => (
-                      <View key={group.attempt}>
-                        {group.attempt
-                          ? control(t('Attempt {number}', { number: group.attempt }), () =>
-                              setExpandedAttempt(expandedAttempt === group.attempt ? null : group.attempt),
-                            )
-                          : null}
-                        {(!group.attempt || expandedAttempt === group.attempt) &&
-                          group.events.map((e, i) => (
-                            <View key={i}>
-                              {line(
-                                e.kind +
-                                  ' · ' +
-                                  new Date(e.at).toLocaleString() +
-                                  (e.version ? ' · v' + e.version : ''),
-                                true,
-                              )}
-                              {line(e.text)}
-                              {e.execution
-                                ? control(t('Open execution conversation'), () => original(e.execution))
-                                : null}
-                            </View>
-                          ))}
+                <View style={discussion || extra ? { display: 'none' } : { gap: 10 }}>
+                  <SectionCard title={t('Properties')}>
+                    <View style={styles.propGrid}>
+                      <View style={styles.propCell}>
+                        <Text style={[typeScale.caption, { color: p.ink3 }]}>{t('Owner')}</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <OwnerAvatar target={item} bots={team?.bots ?? []} rooms={team?.rooms ?? []} catalog={board?.catalog} size={18} />
+                          <Text numberOfLines={1} style={[typeScale.small, { color: p.ink, flexShrink: 1 }]}>{cardOwner(item)}</Text>
+                        </View>
                       </View>
-                    ))
-                  : null}
-                {trail && item.eventNext ? control(t('Earlier activity'), () => void state.earlier()) : null}
-                {item.children.map((c) => (
-                  <View key={c.id}>
-                    {line(c.target + ' · ' + c.status)}
-                    {c.evidence ? line(c.evidence) : null}
-                    {c.status === 'reported'
-                      ? item.actions.map((op) =>
-                          control(name(actionNames, op), () => start(op, item, c), disabled),
-                        )
-                      : null}
-                  </View>
-                ))}
+                      <View style={styles.propCell}>
+                        <Text style={[typeScale.caption, { color: p.ink3 }]}>{t('Task status')}</Text>
+                        <View style={{ alignItems: 'flex-start' }}>
+                          <StatusPill phase={item.phase} label={statusText(item, board?.catalog)} />
+                        </View>
+                      </View>
+                      <View style={styles.propCell}>
+                        <Text style={[typeScale.caption, { color: p.ink3 }]}>{t('Priority')}</Text>
+                        <View style={{ alignItems: 'flex-start' }}>
+                          <PriorityBadge priority={item.priority} showNormal />
+                        </View>
+                      </View>
+                      <View style={styles.propCell}>
+                        <Text style={[typeScale.caption, { color: p.ink3 }]}>{t('Source')}</Text>
+                        <Text style={[typeScale.small, { color: p.ink }]}>{name(sourceNames, item.source)}</Text>
+                      </View>
+                      {item.fields?.startDate ? (
+                        <View style={styles.propCell}>
+                          <Text style={[typeScale.caption, { color: p.ink3 }]}>{t('Start date')}</Text>
+                          <View style={{ alignItems: 'flex-start' }}><DateChip value={item.fields.startDate} phase={item.phase} prefix="start" /></View>
+                        </View>
+                      ) : null}
+                      {item.fields?.dueDate ? (
+                        <View style={styles.propCell}>
+                          <Text style={[typeScale.caption, { color: p.ink3 }]}>{t('Due date')}</Text>
+                          <View style={{ alignItems: 'flex-start' }}><DateChip value={item.fields.dueDate} phase={item.phase} /></View>
+                        </View>
+                      ) : null}
+                      {(board?.catalog?.properties ?? [])
+                        .filter(prop => !prop.archived && item.fields?.customValues && prop.id in item.fields.customValues)
+                        .map(prop => {
+                          const val = item.fields?.customValues?.[prop.id]
+                          const fmt = (v: unknown) => ['person', 'people'].includes(prop.kind) ? assigneeName(String(v), board?.catalog) : String(v)
+                          return (
+                            <View key={prop.id} style={styles.propCell}>
+                              <Text style={[typeScale.caption, { color: p.ink3 }]}>{prop.name}</Text>
+                              <Text style={[typeScale.small, { color: p.ink }]}>{Array.isArray(val) ? val.map(fmt).join(', ') : fmt(val)}</Text>
+                            </View>
+                          )
+                        })}
+                    </View>
+                    {item.fields?.labels?.length ? (
+                      <View style={[styles.row, { paddingTop: 4 }]}>
+                        {item.fields.labels.map((tag, i) => (
+                          <View key={i} style={[styles.idChip, { backgroundColor: p.tagBg }]}>
+                            <Text style={[typeScale.caption, { color: p.tagInk }]}>{tag}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    ) : null}
+                  </SectionCard>
+                  {managementSupported.current ? <BoardPlanningDetail key={item.id} item={item} readOnly={disabled} catalog={board?.catalog}
+                    open={pick} openComment={openComment} annotate={text => { setQuote(text); setDiscussion(true); setExtra('') }}
+                    add={() => start('create', undefined, undefined, { parent: item.id })} /> : null}
+                  <SectionCard title={t('Acceptance criteria')}>
+                    {line(item.criteria || '—')}
+                  </SectionCard>
+                  {item.evidence ? (
+                    <SectionCard title={t('Evidence')} badge={'v' + item.evidenceRevision}>
+                      {line(item.evidence)}
+                    </SectionCard>
+                  ) : null}
+                  {item.hint &&
+                  ![item.criteria, item.evidence].some((value) => value?.replace(/\s+/g, ' ').startsWith(item.hint)) ? (
+                    <View style={{ padding: 11, borderRadius: radius.row, borderLeftWidth: 3, borderLeftColor: p.accent, backgroundColor: tint(p.accent, 0.1) }}>
+                      {line(item.hint, true)}
+                    </View>
+                  ) : null}
+                  {(item.pending.length || item.dependencies.length || item.origin || item.execution) ? (
+                    <SectionCard title={t('Links & conversations')}>
+                      <View style={styles.row}>
+                        {item.pending.map((p) =>
+                          control(
+                            t(p.type === 'question' ? 'Answer question' : 'Review approval'),
+                            async () => {
+                              if (p.botId && p.sessionId)
+                                await call('bot-open-part', { botId: p.botId, sessionId: p.sessionId })
+                                  .then(() => navigation.push('Chat', { kind: 'bot', id: p.botId }))
+                                  .catch(() => void state.refresh())
+                              else if (p.roomId) navigation.push('Chat', { kind: 'room', id: p.roomId })
+                            },
+                            disabled,
+                            true,
+                            p.id,
+                          ),
+                        )}
+                        {item.dependencies.map((d) => <BoardButton key={d.id} variant="soft" title={d.id + ' · ' + d.title} onPress={() => pick(d.id)} />)}
+                        {item.origin ? <BoardButton variant="soft" title={t('Open source conversation')} onPress={() => original(item.origin)} /> : null}
+                        {item.execution ? <BoardButton variant="soft" title={t('Open execution conversation')} onPress={() => original(item.execution)} /> : null}
+                      </View>
+                    </SectionCard>
+                  ) : null}
+                  {item.children.length ? (
+                    <SectionCard title={t('Team run')} badge={String(item.children.length)}>
+                      {item.children.map((c) => (
+                        <View key={c.id} style={{ gap: 6, paddingTop: 6, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: p.line }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <Text style={[typeScale.small, { color: p.ink, fontWeight: '600' }]}>{c.target}</Text>
+                            <StatusPill phase={c.status === 'reported' ? 'review' : c.status === 'completed' ? 'done' : 'doing'} label={c.status} />
+                          </View>
+                          {c.evidence ? line(c.evidence) : null}
+                          {c.status === 'reported' ? (
+                            <View style={styles.row}>
+                              {item.actions.map((op) => control(
+                                name(actionNames, op),
+                                () => start(op, item, c),
+                                disabled,
+                                ['approve', 'dispatch'].includes(op),
+                                op,
+                                DANGER_OPS.has(op),
+                              ))}
+                            </View>
+                          ) : null}
+                        </View>
+                      ))}
+                    </SectionCard>
+                  ) : null}
+                  {item.events.length ? (
+                    <SectionCard
+                      title={t('Activity')}
+                      badge={String(item.events.length)}
+                      right={<BoardButton compact variant="soft" selected={trail} title={t(trail ? 'Collapse' : 'View')} onPress={() => setTrail(!trail)} />}
+                    >
+                      {trail
+                        ? activityByAttempt(item.events).map((group: { attempt: number; events: Item['events'] }) => (
+                            <View key={group.attempt} style={{ gap: 6 }}>
+                              {group.attempt
+                                ? <BoardButton variant="soft" selected={expandedAttempt === group.attempt}
+                                    title={t('Attempt {number}', { number: group.attempt })}
+                                    onPress={() => setExpandedAttempt(expandedAttempt === group.attempt ? null : group.attempt)} />
+                                : null}
+                              {(!group.attempt || expandedAttempt === group.attempt) &&
+                                group.events.map((e, i) => (
+                                  <View key={i} style={{ gap: 4, paddingLeft: 10, borderLeftWidth: 2, borderLeftColor: p.line2 }}>
+                                    {line(
+                                      e.kind +
+                                        ' · ' +
+                                        new Date(e.at).toLocaleString() +
+                                        (e.version ? ' · v' + e.version : ''),
+                                      true,
+                                    )}
+                                    {line(e.text)}
+                                    {e.execution
+                                      ? <BoardButton compact variant="soft" title={t('Open execution conversation')} onPress={() => original(e.execution)} />
+                                      : null}
+                                  </View>
+                                ))}
+                            </View>
+                          ))
+                        : null}
+                      {trail && item.eventNext ? <BoardButton variant="soft" title={t('Earlier activity')} onPress={() => void state.earlier()} /> : null}
+                    </SectionCard>
+                  ) : null}
                 </View>
               </>
             ) : (
               line(t('Loading…'))
             )}
           </ScrollView>
-          <View style={[styles.row, styles.footer, { borderColor: p.line }, (discussion || extra) && !form && { display: 'none' }]}>
-            {form
-              ? control(t('Confirm'), () => void submit(), invalid, true)
-              : item ? <>
-                {managementSupported.current ? control(t('Edit work item'), () => start('edit-fields', item), disabled) : null}
-                {item.source !== 'run' ? item.actions.map(op =>
-                  control(name(actionNames, op), () => start(op, item), disabled, ['dispatch', 'approve'].includes(op))) : null}
-              </> : null}
-
-          </View>
+          {form ? renderFormFooter() : item && !(discussion || extra) ? renderDetailFooter(item) : null}
         </View>
       ) : null}
       {report ? (
-        <View accessibilityRole="alert" style={{ padding: 7, backgroundColor: p.card }}>
-          {line(
-            report +
+        <View accessibilityRole="alert" style={{ paddingHorizontal: 14, paddingVertical: 8, backgroundColor: p.card, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: p.line, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <Text style={[typeScale.small, { color: p.danger, flex: 1 }]}>
+            {report +
               (state.refreshAt
                 ? ' · ' + t('Last read') + ' ' + new Date(state.refreshAt).toLocaleTimeString()
-                : ''),
-          )}
-          {control(t('Refresh'), () => void state.refresh(), !online)}
+                : '')}
+          </Text>
+          <BoardButton compact title={t('Refresh')} disabled={!online} onPress={() => void state.refresh()} />
         </View>
       ) : null}
-      <Modal transparent animationType="fade" visible={!!opts} onRequestClose={() => setOpts(null)}>
-        <Pressable style={styles.scrim} onPress={() => setOpts(null)}>
-          <View style={[styles.sheet, { backgroundColor: p.card, paddingBottom: Math.max(16, insets.bottom) }]}>
-            {line(opts?.name ?? '')}
-            <ScrollView>
-              {opts?.options.map(([v, n]) => control(n, () => opts.select(v), false, false, v))}
-            </ScrollView>
-          </View>
-        </Pressable>
-      </Modal>
+      <BoardManagementSheet
+        visible={toolsOpen}
+        onClose={() => setToolsOpen(false)}
+        catalog={board?.catalog}
+        filters={filters}
+        changeFilters={patch => setFilters(old => ({ ...old, ...patch }))}
+        display={display}
+        setDisplay={setDisplay}
+        selectedView={viewId}
+        applyView={applyView}
+        readOnly={disabled}
+        selecting={selecting}
+        toggleSelecting={() => { setSelecting(!selecting); setChecked(new Map()) }}
+        selected={Array.from(checked, ([id, version]) => ({ id, version }))}
+        refresh={state.refresh}
+        resetAll={resetAll}
+        bulkOpen={bulkOpen}
+        setBulkOpen={setBulkOpen}
+        onBulk={rejected => setChecked(old => {
+          const retained = new Map<string, string>()
+          for (const { id } of rejected) {
+            const version = old.get(id)
+            if (version) retained.set(id, version)
+          }
+          return retained
+        })}
+      />
+      <ModalOptionPicker opts={opts} onClose={() => setOpts(null)} />
     </View>
   )
 }

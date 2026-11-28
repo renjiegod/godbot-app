@@ -7,7 +7,8 @@ import * as Sharing from 'expo-sharing'
 import { useTeam } from '../team/context.tsx'
 import { makeBoardCommentLink } from '../team/work-board-link.ts'
 import { t } from '../ui/i18n.ts'
-import { useTheme, type as typeScale } from '../ui/tokens.ts'
+import { BotMark } from '../ui/marks.tsx'
+import { radius, shadow, useTheme, type as typeScale } from '../ui/tokens.ts'
 import { BoardField } from './work-board-management.tsx'
 import { Markdown } from './chat/markdown.tsx'
 import { useWorkBoardDiscussion } from '../../godbot/shared/work-board-discussion.js'
@@ -66,8 +67,8 @@ export function WorkBoardDiscussion({ id, active, disabled: offline, focus, open
   openRun?: (runId: string) => void; openComment: (commentId: string) => void
   createSubtask?: (entry: Comment) => void; quote?: string
 }) {
-  const { p } = useTheme()
-  const { call, onFeed, online, computer } = useTeam()
+  const { p, dark } = useTheme()
+  const { call, onFeed, online, computer, team } = useTeam()
   const state = useWorkBoardDiscussion({
     call, subscribe: onFeed, id, active, online, focus, requestId: Crypto.randomUUID,
   })
@@ -230,16 +231,19 @@ export function WorkBoardDiscussion({ id, active, disabled: offline, focus, open
 
   function comment(entry: Comment) {
     const current = action?.id === entry.id ? action.type : null
+    const bot = entry.botId ? team?.bots?.find(b => b.id === entry.botId) : undefined
     return (
-      <View key={entry.id} style={[styles.comment, {
+      <View key={entry.id} style={[styles.comment, shadow(1), {
         borderColor: focus === entry.id ? p.accent : p.line, backgroundColor: p.card,
       }]} onLayout={(event) => {
         if (entry.parentId && entry.id === focus) setReplyY(event.nativeEvent.layout.y)
       }}>
         <View style={styles.row}>
-          <Text style={[styles.avatar, { backgroundColor: p.bubble, color: entry.botId ? p.accent : p.ink }]}>
-            {entry.deleted ? '–' : Array.from(name(entry))[0]}
-          </Text>
+          {bot ? <BotMark bot={bot} dark={dark} size={24} /> : (
+            <Text style={[styles.avatar, { backgroundColor: p.bubble, color: entry.botId ? p.accent : p.ink }]}>
+              {entry.deleted ? '–' : Array.from(name(entry))[0]}
+            </Text>
+          )}
           <Text style={[typeScale.settingsRow, { color: p.ink, fontWeight: '600' }]}>
             {entry.deleted ? t('Deleted comment') : name(entry)}
           </Text>
