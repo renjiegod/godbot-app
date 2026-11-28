@@ -320,6 +320,49 @@ test('the beat also retries when the socket connects but the computer never answ
   assert.equal(h.manager.snapshot().online, true)
 })
 
+test('transient hello failures close the client and retry at the foreground interval', async (t) => {
+  pausedTimers(t)
+  const failures = [
+    Object.assign(new Error('Hello timed out'), { code: 'RPC_TIMEOUT' }),
+    Object.assign(new Error('Transport closed'), { code: 'TRANSPORT_CLOSED' }),
+  ]
+  const h = setup({ appState: 'active', hello: () => {
+    const failure = failures.shift()
+    if (failure) throw failure
+  } })
+  h.manager.holdForScreen(A, phone)
+
+  for (const [attempt, message] of ['Connection timed out', 'Not connected to the computer yet.'].entries()) {
+    await settle()
+    assert.equal(h.manager.snapshot().error, message)
+    assert.equal(h.manager.snapshot().fatal, false)
+    assert.equal(h.clients[attempt].closed, true)
+    h.advance(2_000)
+    h.manager.tick('beat')
+  }
+  await settle()
+  assert.equal(h.manager.snapshot().client, h.clients[2])
+  assert.equal(h.manager.snapshot().online, true)
+  assert.equal(h.manager.snapshot().error, null)
+})
+
+test('a missing hello endpoint still asks for an upgrade and backs off', async (t) => {
+  const timers = pausedTimers(t)
+  const h = setup({ appState: 'active', hello: () => {
+    throw Object.assign(new Error('Unknown endpoint hello'), { code: 'bot/not-found' })
+  } })
+  h.manager.holdForScreen(A, phone)
+  await settle()
+  assert.equal(h.manager.snapshot().error, 'Update Godbot on the computer to use this phone.')
+  assert.deepEqual(timers.pending().map(timer => timer.ms), [2_000])
+
+  h.advance(2_000)
+  h.manager.tick('beat')
+  await settle()
+  assert.equal(h.clients[1].closed, true)
+  assert.deepEqual(timers.pending().map(timer => timer.ms), [4_000])
+})
+
 test('notices become system notifications only while the app is not on screen, also the ones missed', async (t) => {
   pausedTimers(t)
   const h = setup({

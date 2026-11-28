@@ -95,6 +95,8 @@ export function errorText(error: unknown): string {
   if (rejected(error)) return t('The computer did not accept this phone. Show a new QR code on the computer and scan it again.')
   if (code === 'HOST_OFFLINE') return t('The computer is not connected to the Server. Check that Godbot is open and phone access is on.')
   if (code === 'SERVER_UNREACHABLE') return t('Could not reach the Server. Check the network. If the computer\'s Server address changed, pair again under Computers.')
+  if (code === 'RPC_TIMEOUT') return t('Connection timed out')
+  if (code === 'TRANSPORT_CLOSED' || code === 'CLIENT_CLOSED') return t('Not connected to the computer yet.')
   return hostText(error instanceof Error ? error.message : String(error))
 }
 
@@ -175,7 +177,11 @@ export function createLinkManager(deps: LinkDeps) {
       heard = { frames: deps.relayFramesReceived(client), at: deps.now() }
       probedAt = 0
       // Only expose a client to the screens once the paired host's Godbot API is verified.
-      const answer = await deps.callBot<Hello>(client, 'hello', helloRequest()).catch(() => null)
+      const answer = await deps.callBot<Hello>(client, 'hello', helloRequest()).catch((failure: unknown) => {
+        const code = (failure as { code?: unknown })?.code
+        if (code === 'bot/not-found' || code === 'METHOD_NOT_FOUND') return null
+        throw failure
+      })
       if (!current()) { void client.close(); return }
       attempt = null
       const verdict = checkHello(answer)
@@ -223,6 +229,8 @@ export function createLinkManager(deps: LinkDeps) {
     } catch (failure) {
       if (!current()) return
       attempt = null
+      void mine.client?.close().catch(() => {})
+      incompatible = false
       set({ error: errorText(failure) })
       if (rejected(failure)) { set({ fatal: true }); return }
       schedule()
