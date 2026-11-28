@@ -223,6 +223,7 @@ const ZH = {
   'Unassigned': '未指派',
   'Open source conversation': '打开发起会话',
   'Open execution conversation': '打开执行会话',
+  'Continue in native terminal': '在原生终端继续',
   'Dispatch to the source conversation': '任务将派到发起此工作的会话。',
   'Dispatch to a dedicated task conversation': '任务将派到负责 Bot 的专用任务会话。',
   'This work item changed. Reopen the action to review the current evidence.': '工作项已更新。请返回详情核对最新证据后再操作。',
