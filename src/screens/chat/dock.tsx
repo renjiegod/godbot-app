@@ -6,9 +6,10 @@ import { CONVERSATION_INSET, CONVERSATION_WIDTH } from './layout.ts'
 import { ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View, Pressable } from 'react-native'
 import Animated, { useReducedMotion, useAnimatedStyle, withRepeat, withTiming, withSpring, useSharedValue, withSequence } from 'react-native-reanimated'
 import { useEffect } from 'react'
-import type { Approval, ConnectorRequest, Question, ShownView } from '../../connection.ts'
+import type { Approval, ConnectorRequest, DelegatedWork, Question, ShownView } from '../../connection.ts'
 import { connectorCanConnectOnMobile } from '../../team/connectors.ts'
-import { t } from '../../ui/i18n.ts'
+import { messageClock, t } from '../../ui/i18n.ts'
+import { delegatedProgressLabels } from '../../../godbot/shared/delegated-progress.js'
 import { radius, shadow, SPRING_TAP, type as typeScale, type Palette } from '../../ui/tokens.ts'
 import { Avatar } from '../../ui/marks.tsx'
 import type { Bot } from '../../connection.ts'
@@ -307,6 +308,15 @@ export function HandoffCard({ handoff, botId, onView, call, p , bare = false }: 
 // What a Bot is doing, above the composer. In a group, `onPress` opens the work of the
 // member it names (the member's work sheet).
 // `note` follows the phrase in a quieter ink: what comes of work that has no turn to time.
+export function DelegatedProgressRow({ work, p }: { work: DelegatedWork; p: Palette }) {
+  const { activity, detail, milestone } = delegatedProgressLabels(work, t, messageClock)
+  return <View testID="delegated-progress" accessibilityLiveRegion="polite" style={styles.delegated}>
+    <Text style={[type.small, { color: p.ink }]}>{activity}</Text>
+    {milestone ? <Text numberOfLines={3} style={[type.small, { color: p.ink }]}>{milestone}</Text> : null}
+    <Text style={[type.caption, { color: p.ink3 }]}>{detail}</Text>
+  </View>
+}
+
 export function ActionRow({ bot, doing, note, p, dark, conversation, onPress }: { bot: Bot; doing: string; note?: string; p: Palette; dark: boolean; conversation: boolean; onPress?: () => void }) {
   const reduced = useReducedMotion()
   const shimmer = useSharedValue(0.35)
@@ -365,6 +375,7 @@ const styles = StyleSheet.create({
   secretInput: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, minHeight: 40, paddingVertical: 8, marginTop: 10, fontSize: 14 },
   choice: { flex: 1, minWidth: 104, minHeight: 44, borderRadius: radius.pill, paddingHorizontal: 14, paddingVertical: 8, alignItems: 'center', justifyContent: 'center' },
   action: { flexDirection: 'row', alignItems: 'center', height: 36, marginHorizontal: 12 },
+  delegated: { gap: 3, paddingVertical: 6, paddingHorizontal: 16, width: '100%', maxWidth: CONVERSATION_WIDTH, alignSelf: 'center' },
   conversationActionFrame: { alignSelf: 'center', width: '100%', maxWidth: CONVERSATION_WIDTH + 2 * CONVERSATION_INSET, paddingHorizontal: CONVERSATION_INSET },
   conversationAction: { marginHorizontal: 0, minHeight: 36, height: 'auto', borderTopWidth: StyleSheet.hairlineWidth, paddingVertical: 6 },
 })

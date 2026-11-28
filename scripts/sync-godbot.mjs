@@ -31,6 +31,7 @@ export const SHARED_FILES = [
   ['src/team/work-board-planning.js', 'shared/work-board-planning.js'],
   ['src/team/work-board-discussion-format.js', 'shared/work-board-discussion-format.js'],
   ['src/team/mentions.js', 'shared/mentions.js'],
+  ['src/team/delegated-progress.js', 'shared/delegated-progress.js'],
   ['src/host/team-runtime/shared/im-platforms.js', 'shared/im-platforms.js'],
   ['src/host/team-runtime/shared/file-chunks.js', 'shared/file-chunks.js'],
 ]

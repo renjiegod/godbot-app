@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTeam } from '../../team/context.tsx'
-import { t } from '../../ui/i18n.ts'
+import type { DeliveryProgress } from '../../connection.ts'
+import { messageClock, t } from '../../ui/i18n.ts'
 import { type, useTheme } from '../../ui/tokens.ts'
 
 const labels = {
@@ -15,6 +16,7 @@ interface Delivery {
   to: string
   state: keyof typeof labels
   reason?: string
+  progress?: DeliveryProgress
   text: string
 }
 
@@ -68,6 +70,9 @@ function DeliveryList({ botId, sessionId, onClose }: { botId: string; sessionId:
         <Text testID={'bot-delivery-' + row.state} style={[type.caption, { color: row.state === 'blocked' ? p.danger : p.ink2 }]}>
           {t(labels[row.state])}{row.reason ? ' · ' + row.reason : ''}
         </Text>
+        {row.progress ? <Text selectable style={[type.caption, { color: p.ink2 }]}>
+          {messageClock(row.progress.at)} · {row.progress.blocked ? t('Blocked · {text}', { text: row.progress.text }) : row.progress.text}
+        </Text> : null}
       </View>)}
     </ScrollView>
   </View>

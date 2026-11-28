@@ -21,7 +21,7 @@ import { shadow, useTheme } from '../ui/tokens.ts'
 import { Avatar, RoomAvatar } from '../ui/marks.tsx'
 import { ArrowDownIcon } from '../ui/icons.tsx'
 import { workPhrase } from '../ui/phrases.ts'
-import { ActionRow, Dock } from './chat/dock.tsx'
+import { ActionRow, DelegatedProgressRow, Dock } from './chat/dock.tsx'
 import { Composer, type Photo } from './chat/composer.tsx'
 import { BotDeliveries } from './chat/bot-deliveries.tsx'
 import { BotGoalCard } from './chat/bot-goal.tsx'
@@ -297,6 +297,7 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
   // The part on screen's own work: while another session of the Bot runs in the
   // background, the Bot's work may be that one's (bot-sessions.ts partWork).
   const doing = bot !== undefined ? partWork(bot, sessionId, team) : undefined
+  const delegated = bot !== undefined ? team?.work?.delegated?.[sessionId] : undefined
   const activeTool = doing && !doing.tool ? page?.items.findLast(item => item.kind === 'tool' && item.status === 'running') : undefined
   const secrets = (team?.secretRequests?.[bot?.id ?? ''] ?? []).filter((r: { status?: string }) => r.status === 'pending')
   const connectorRequests = (team?.connectorRequests?.[bot?.id ?? ''] ?? []).filter((r: { status?: string }) => r.status === 'pending')
@@ -616,7 +617,8 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
       </View>
       {bot?.blocked !== undefined ? <BlockedCard bot={bot} p={p} /> : null}
       {bot !== undefined ? <ComputerCards bot={bot} p={p} /> : null}
-      {running && doingBot ? <ActionRow bot={doingBot} doing={doingText} p={p} dark={dark} conversation={conversation}
+      {delegated ? <DelegatedProgressRow work={delegated} p={p} />
+        : running && doingBot ? <ActionRow bot={doingBot} doing={doingText} p={p} dark={dark} conversation={conversation}
         onPress={memberWork && roomWork[0] !== undefined && workAt(roomWork[0]) !== undefined ? () => openWork(roomWork[0].botId, workAt(roomWork[0]) ?? {}) : undefined} />
         : background && bot !== undefined ? <ActionRow bot={bot} doing={t('Working in the background')} note={t('Replies when done')} p={p} dark={dark} conversation={conversation} /> : null}
       {bot && canUseGoals && (canWriteGoal || botGoal) ? <BotGoalCard key={`goal:${chatKey}`}
