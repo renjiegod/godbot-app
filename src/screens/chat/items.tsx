@@ -31,6 +31,7 @@ export interface ChatItem {
   toolId?: string
   status?: string
   cause?: string
+  restart?: { phase: 'waiting' | 'retry' } | { phase: 'resumed'; turn: number }
   exitCode?: number
   text?: string
   time?: number
@@ -139,9 +140,13 @@ export const Item = memo(function Item({ item, p, layout, maxWidth, inRoom, sess
   if (item.kind === 'turn-status') {
     const label = t(item.status === 'stopped' ? 'Turn stopped' : item.status === 'failed' ? 'Turn failed' : 'Turn interrupted')
     const color = item.status === 'stopped' ? p.ink2 : p.danger
-    const detail = item.cause === 'steered' ? t('Continued with the new message')
+    const restart = item.cause === 'update-restart' ? item.restart : undefined
+    const restartDetail = restart?.phase === 'resumed' ? t('Interrupted by an update restart. Continued in turn {turn}.', { turn: restart.turn })
+      : restart?.phase === 'retry' ? t('Interrupted by an update restart. Automatic continuation did not start.')
+        : restart ? t('Interrupted by an update restart. Waiting to continue.') : undefined
+    const detail = restartDetail ?? (item.cause === 'steered' ? t('Continued with the new message')
       : item.cause === 'output-limit' ? t('Reached the output limit')
-        : item.exitCode === undefined ? '' : t('Exit code {code}', { code: item.exitCode })
+        : item.exitCode === undefined ? '' : t('Exit code {code}', { code: item.exitCode }))
     return (
       <View accessibilityRole="text" accessibilityLiveRegion="polite" style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginVertical: 5 }}>
         <Text style={[type.caption, { color, borderWidth: StyleSheet.hairlineWidth, borderColor: color, borderRadius: 6,
