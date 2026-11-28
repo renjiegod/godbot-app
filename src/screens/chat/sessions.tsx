@@ -83,8 +83,9 @@ export function useSessionSwitch(bot: Bot, { onOpened, onStarted }: { onOpened?:
       if (mounted.current) setPending(null)
     }
   }
+  // A conversation opens at its head, the part it goes on in; the computer opens it whole.
   const open = (entry: BotSession) => entry.current || starting ? undefined : ask(entry.id, async () => {
-    await call('bot-open-part', { botId: bot.id, sessionId: entry.id })
+    await call('bot-open-part', { botId: bot.id, sessionId: entry.head })
     done.current.onOpened?.(entry, entry.running && !parallelSessions(team))
   })
   // 'empty': nobody talked in the current part, so another would only add an empty one.
@@ -179,7 +180,8 @@ export function SessionRow({ entry, label, p, opening, disabled, onPress }: {
   const hint = entry.current ? t('Current session') : entry.running ? t('Open this running session') : entry.background ? t('Open this session') : t('Open this earlier session')
   const off = disabled || entry.current
   // The copy button sits beside the row, not in it, so TalkBack reaches both and a
-  // copy never opens the session. It copies the current session too.
+  // copy never opens the session. It copies the current session too, by the
+  // conversation's ID, which stays the same when Godbot moves it on to a fresh part.
   return (
     <View style={[styles.rowWrap, { backgroundColor: entry.current ? p.hover : 'transparent' }]}>
       <Pressable testID={`session-${entry.id}`} accessibilityRole="button" accessibilityLabel={[label, meta.text].filter(Boolean).join(', ')} accessibilityHint={hint}

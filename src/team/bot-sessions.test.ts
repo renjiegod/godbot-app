@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { Bot, TeamState } from '../connection.ts'
 import { hostText, setLang, t } from '../ui/i18n.ts'
-import { backgroundRunning, botSessions, elsewhere, parallelSessions, partWork, sessionLabel, sessionMeta, switchable, unknownEndpoint, worksInBackground } from './bot-sessions.ts'
+import { backgroundRunning, botSessions, conversationOfPart, elsewhere, parallelSessions, partWork, sessionLabel, sessionMeta, switchable, unknownEndpoint, worksInBackground } from './bot-sessions.ts'
 
 setLang('en')
 
@@ -27,10 +27,39 @@ const team: TeamState = {
 test('every session of the chat is listed newest first, background chains included', () => {
   const entries = botSessions(bot, team)
   assert.deepEqual(entries.map(entry => entry.id), ['p6', 'p4', 'p3', 'p2', 'p0', 'p1'], 'the empty busy-time part is left out')
-  assert.deepEqual(entries.find(entry => entry.id === 'p4'), { id: 'p4', number: 5, current: true, background: false, running: true, waiting: false, title: 'continue working on issues/2020' })
+  assert.deepEqual(entries.find(entry => entry.id === 'p4'), { id: 'p4', head: 'p4', parts: ['p4'], number: 5, current: true, background: false, running: true, waiting: false, title: 'continue working on issues/2020' })
   assert.equal(entries.find(entry => entry.id === 'p6')?.background, true)
   assert.equal(entries.find(entry => entry.id === 'p3')?.waiting, true)
   assert.equal(entries.find(entry => entry.id === 'p0')?.number, 2)
+})
+
+// The report: the computer moved the chat on to a fresh part (eec) while the user read
+// the first one (7ec). It lists them as one conversation, so the phone shows one session
+// named after the first prompt, copies the first part's ID and opens it at eec.
+test('a conversation the computer moved on to a fresh part is one session with its first ID', () => {
+  const moved: Bot = {
+    id: 'bot', name: 'Codex', sessionId: 'eec', parts: ['old', '7ec'], partOrder: ['old', '7ec', 'eec'],
+    conversations: [
+      { id: '7ec', head: 'eec', parts: ['7ec', 'eec'], current: true },
+      { id: 'old', head: 'old', parts: ['old'] },
+    ],
+  }
+  const state: TeamState = {
+    revision: 1, bots: [moved], partsRunning: { eec: true }, questions: { eec: { id: 'q', question: 'Ship it?' } },
+    partTitles: { old: 'earlier chat', '7ec': 'integrate the work board', eec: 'is publish finished' },
+    partActivity: { old: 200, '7ec': 100, eec: 300 },
+  }
+  const rows = botSessions(moved, state)
+  assert.deepEqual(rows.map(({ id, head, number, current, running, waiting, title }) => [id, head, number, current, running, waiting, title]), [
+    ['7ec', 'eec', 2, true, true, true, 'integrate the work board'],
+    ['old', 'old', 1, false, false, false, 'earlier chat'],
+  ], 'a session is as recent as its latest part')
+  const quiet = { ...state, partsRunning: {}, questions: {}, partActivity: { old: 900, '7ec': 100, eec: 300 } }
+  assert.deepEqual(botSessions(moved, quiet).map(row => row.id), ['old', '7ec'], 'idle sessions sort by their latest activity')
+  assert.equal(conversationOfPart(moved, 'eec')?.id, '7ec')
+  assert.equal(conversationOfPart(moved, '7ec')?.head, 'eec')
+  assert.equal(conversationOfPart(moved, 'nowhere'), undefined)
+  assert.equal(conversationOfPart(bot, 'p2')?.head, 'p2', 'an older host lists each part as its own conversation')
 })
 
 test('running rows come first, with the host timestamp ordering each set of rows', () => {
