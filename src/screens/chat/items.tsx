@@ -44,6 +44,7 @@ export interface ChatItem {
   name?: string
   botId?: string
   sessionId?: string
+  workItemId?: string
   images?: number
   // The IM platform a user message came in over (parts.js viaOf).
   via?: string
@@ -98,7 +99,7 @@ const dataUri = (value: unknown) => `data:${(value as { mime?: string })?.mime ?
 // One displayItems row (parts.js). Conversation and Flat draw Bot replies on the chat surface.
 // `onOpenWork` opens a group member's work sheet on a turn; `showWork` puts the way into
 // this reply's turn on the row (once per run of one turn's replies, member-work.ts).
-export const Item = memo(function Item({ item, p, layout, maxWidth, inRoom, sessionId, open, onToggle, onLongPress, onOpenFile, onSaveFile, onRetry, onOpenWork, showWork, stamp, author, admin }: { item: ChatItem; p: Palette; layout: ChatLayout; maxWidth: number; inRoom: boolean; sessionId?: string; open?: boolean; onToggle?: () => void; stamp?: string; author?: Bot; admin?: boolean; onLongPress?: (text: string) => void; onOpenFile?: (file: FileRef) => void; onSaveFile?: (file: FileRef) => void; onRetry?: (localId: string, discard?: boolean) => void; onOpenWork?: (botId: string, at: Partial<LineWork>) => void; showWork?: boolean }) {
+export const Item = memo(function Item({ item, p, layout, maxWidth, inRoom, sessionId, open, onToggle, onLongPress, onOpenFile, onSaveFile, onRetry, onOpenWork, onOpenBoardItem, showWork, stamp, author, admin }: { item: ChatItem; p: Palette; layout: ChatLayout; maxWidth: number; inRoom: boolean; sessionId?: string; open?: boolean; onToggle?: () => void; stamp?: string; author?: Bot; admin?: boolean; onLongPress?: (text: string) => void; onOpenFile?: (file: FileRef) => void; onSaveFile?: (file: FileRef) => void; onRetry?: (localId: string, discard?: boolean) => void; onOpenWork?: (botId: string, at: Partial<LineWork>) => void; onOpenBoardItem?: (id: string) => void; showWork?: boolean }) {
   const { dark } = useTheme()
   const conversation = layout === 'conversation'
   const userFill = conversation ? p.conversationUser : p.user
@@ -169,6 +170,13 @@ export const Item = memo(function Item({ item, p, layout, maxWidth, inRoom, sess
     const line = relayReplyText(item.reply)
     return line ? <Text style={[type.caption, { color: p.ink3, alignSelf: 'center', marginVertical: 4, paddingHorizontal: 12, textAlign: 'center' }]}>{line}</Text> : null
   }
+  const boardId = item.workItemId
+  const boardLink = boardId && onOpenBoardItem
+    ? <Pressable accessibilityRole="button" accessibilityLabel={t('Open work item {id}', { id: boardId })}
+        onPress={() => onOpenBoardItem(boardId)} style={{ paddingVertical: 5, paddingHorizontal: 4 }}>
+        <Text style={[type.caption, { color: p.accent }]}>{boardId}</Text>
+      </Pressable>
+    : null
   if (item.kind === 'event') {
     if (item.role === 'paused') return <Text style={[type.caption, { color: p.ink3, alignSelf: 'center', marginVertical: 4, paddingHorizontal: 12, textAlign: 'center' }]}>{t('Paused after {count} Bot relays. Waiting: {names}', { count: item.ms ?? 0, names: item.text ?? '' })}</Text>
     if (item.role === 'schedule') return <Text style={[type.caption, { color: p.ink3, alignSelf: 'center', marginVertical: 4, paddingHorizontal: 12, textAlign: 'center' }]}>{item.text ? t('Scheduled task: {text}', { text: item.text }) : t('Routine started')}</Text>
@@ -187,7 +195,10 @@ export const Item = memo(function Item({ item, p, layout, maxWidth, inRoom, sess
     }
     if (round !== undefined) return <Text style={[type.caption, { color: p.ink3, alignSelf: 'center', marginVertical: 4, paddingHorizontal: 12, textAlign: 'center' }]}>{round}</Text>
     const label = { request: t('asked for work'), reply: t('replied'), report: t('reported back'), stopped: t('stopped') }[item.role ?? ''] ?? item.role ?? ''
-    return <Text style={[type.caption, { color: p.ink3, alignSelf: 'center', marginVertical: 4, paddingHorizontal: 12, textAlign: 'center' }]}>{t('{name} {event}', { name: item.name ?? t('a Bot'), event: label })}</Text>
+    return <View style={{ alignSelf: 'center', alignItems: 'center', marginVertical: 4 }}>
+      <Text style={[type.caption, { color: p.ink3, paddingHorizontal: 12, textAlign: 'center' }]}>{t('{name} {event}', { name: item.name ?? t('a Bot'), event: label })}</Text>
+      {boardLink}
+    </View>
   }
   if (item.kind === 'closed') {
     const badge = t(item.closed === 'replied' ? 'Answered by message' : 'Dismissed')
@@ -310,11 +321,12 @@ export const Item = memo(function Item({ item, p, layout, maxWidth, inRoom, sess
       </View>
     )
     // user-message.js: the time under the bubble, after an IM message's platform tag.
-    return stamp || item.via ? (
+    return stamp || item.via || boardLink ? (
       <View style={{ alignSelf: 'flex-end', alignItems: 'flex-end', maxWidth }}>
         {bubble}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2, marginRight: 2 }}>
           {item.via ? <Text style={[styles.via, { backgroundColor: p.hover, color: p.ink3 }]}>{t('via {platform}', { platform: imPlatform(item.via)?.name ?? item.via })}</Text> : null}
+          {boardLink}
           {stamp ? <Text style={[type.caption, conversation && styles.conversationStamp, { color: conversation ? p.ink2 : p.ink3 }]}>{stamp}</Text> : null}
         </View>
       </View>

@@ -175,6 +175,8 @@ const ZH = {
   'Source record': '来源记录',
   'Earlier activity': '更早的活动',
   'Work board': '工作看板',
+  'Open work item {id}': '打开工作项 {id}',
+  'Next action by {name}': '下一步由 {name} 处理',
   'Close work board': '关闭工作看板',
   'New work item': '新建工作项',
   'Work item': '工作项',
