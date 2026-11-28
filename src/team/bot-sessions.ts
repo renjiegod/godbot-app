@@ -1,11 +1,16 @@
 // A Bot's chat sessions as the phone lists them, the same list as the desktop's
 // (bot-sessions.js): the sheet behind the chat's Sessions button and the list on the
 // Bot's details page.
-import type { Bot, TeamState } from '../connection.ts'
+import type { Bot, BotConversation, TeamState } from '../connection.ts'
 import { t } from '../ui/i18n.ts'
 
 export interface BotSession {
+  /** The conversation's ID, the one to copy: its first part's, which stays the same when
+   * Godbot moves the conversation on to a fresh part. */
   id: string
+  /** The part the conversation goes on in, the one to open. */
+  head: string
+  parts: string[]
   /** Counts the sessions in the order DSH made them, from 1. */
   number: number
   current: boolean
@@ -21,34 +26,59 @@ export interface BotSession {
 export const currentPart = (bot: Bot) => bot.sessionId ?? bot.id
 const runningRank = (entry: BotSession) => Number(entry.running && !entry.waiting)
 
-// Every session of a Bot's own chat: the current one, each one going on in the
-// background, and the earlier ones of every chain. Running rows come first, then
-// newest activity within each set. Empty sessions are hidden unless current or running.
+// Every part of a Bot's own chat: the current one, each one going on in the background,
+// and the earlier ones of every chain.
+const ownParts = (bot: Bot) => {
+  const open = bot.openParts ?? []
+  return unique([currentPart(bot), ...open.map(part => part.sessionId), ...(bot.parts ?? []), ...open.flatMap(part => part.parts ?? [])])
+}
+
+// The conversations of a Bot's own chat as the host groups its parts (`conversations`).
+// An older host sends none: each part is a conversation of its own there.
+export function botConversations(bot: Bot): BotConversation[] {
+  if (Array.isArray(bot.conversations)) return bot.conversations
+  return ownParts(bot).map(id => ({ id, head: id, parts: [id] }))
+}
+
+// The conversation a part belongs to, whichever of its parts it is: its ID to copy and
+// its head to open. The desktop reads it the same way (bot-sessions.js conversationOfPart).
+export const conversationOfPart = (bot: Bot, sessionId: string): BotConversation | undefined =>
+  botConversations(bot).find(conversation => conversation.parts.includes(sessionId))
+
+// Every session of a Bot's own chat, one per conversation: the current one, each one
+// going on in the background, and the earlier ones of every chain. A conversation Godbot
+// moved on to a fresh part is one session. Running rows come first, then newest activity
+// within each set. Empty sessions are hidden unless current or running.
 export function botSessions(bot: Bot, team: TeamState | null): BotSession[] {
   const current = currentPart(bot)
   const empty = new Set(team?.emptyParts?.[bot.id] ?? [])
   const running = team?.partsRunning ?? {}
   const open = bot.openParts ?? []
   const background = new Set(open.map(part => part.sessionId))
-  const ids = unique([current, ...background, ...(bot.parts ?? []), ...open.flatMap(part => part.parts ?? [])])
+  const conversations = botConversations(bot)
+  const ids = new Set(conversations.map(conversation => conversation.id))
   // The host orders parts by when DSH made them (`partOrder`). A part it has not ordered,
   // or a host that sends no order, comes after: earlier parts before the parts they led
-  // to, the current one last.
+  // to, the current one last. A session counts by its first part.
   const order = unique([...(bot.partOrder ?? []), ...(bot.parts ?? []), ...open.flatMap(part => [...(part.parts ?? []), part.sessionId]), current])
+    .filter(id => ids.has(id))
   const numbers = new Map(order.map((id, index) => [id, index + 1]))
   const activity = team?.partActivity
-  return ids
-    .filter(id => id === current || running[id] === true || !empty.has(id))
-    .map(id => ({
+  const latest = (parts: string[]) => Math.max(0, ...parts.map(part => activity?.[part] ?? 0))
+  return conversations
+    .filter(({ parts }) => parts.includes(current) || parts.some(part => running[part] === true || !empty.has(part)))
+    .map(({ id, head, parts }) => ({
       id,
+      head,
+      parts,
       number: numbers.get(id) ?? order.length + 1,
-      current: id === current,
-      background: background.has(id),
-      running: running[id] === true,
-      waiting: team?.questions?.[id] !== undefined,
-      title: team?.partTitles?.[id] ?? '',
+      current: parts.includes(current),
+      background: background.has(head),
+      running: parts.some(part => running[part] === true),
+      waiting: parts.some(part => team?.questions?.[part] !== undefined),
+      title: parts.map(part => team?.partTitles?.[part]).find((title): title is string => typeof title === 'string' && title !== '') ?? '',
     }))
-    .sort((a, b) => runningRank(b) - runningRank(a) || (activity?.[b.id] ?? 0) - (activity?.[a.id] ?? 0) || b.number - a.number)
+    .sort((a, b) => runningRank(b) - runningRank(a) || latest(b.parts) - latest(a.parts) || b.number - a.number)
 }
 
 const unique = (ids: (string | undefined)[]): string[] =>

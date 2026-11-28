@@ -284,7 +284,7 @@ function ChatScreenB({ route, navigation }: any) {
       <ChatView key={`${computer?.hostDeviceId ?? ''}:${kind}:${id}:${params?.boardPart ?? ''}`} bot={bot} room={room} header={header} onMissing={onMissing}
         boardPart={params?.boardPart} boardMessage={params?.boardMessage} boardTurn={params?.boardTurn} boardReference={params?.boardReference} sessionReadOnly={sessionReadOnly || !!params?.boardPart && params.boardPart !== (bot?.sessionId ?? room?.sessionId ?? id)} />
       {bot !== undefined && sessionsOpen ? <SessionSheet bot={bot} visible onClose={() => setSessionsOpen(false)}
-        onOpened={(entry, readOnly) => navigation.setParams({ readOnlyPart: readOnly ? entry.id : undefined })} /> : null}
+        onOpened={(entry, readOnly) => navigation.setParams({ readOnlyPart: readOnly ? entry.head : undefined })} /> : null}
     </>
   )
 }

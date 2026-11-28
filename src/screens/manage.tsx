@@ -16,7 +16,7 @@ import { DEMO, useTeam } from '../team/context.tsx'
 import { legacyAutomationView, type AutomationView } from '../team/automation.ts'
 import { memorySummaryText } from '../team/memory.ts'
 import { botPrivacyBlock, isLocalModel, modelRoute, sessionFigures, sessionUsage, watchTurns, type SessionStats, type TurnWatch } from '../team/bot-details.ts'
-import { botSessions, currentPart, sessionLabel } from '../team/bot-sessions.ts'
+import { botSessions, conversationOfPart, currentPart, sessionLabel } from '../team/bot-sessions.ts'
 import { SessionRow, useSessionsAvailable, useSessionSwitch } from './chat/sessions.tsx'
 import { SessionIdLine } from '../ui/copy-id.tsx'
 import { connectorRows } from '../team/connectors.ts'
@@ -238,7 +238,7 @@ export function BotDetails({ route, navigation }: any) {
           <View style={styles.detailIdentity}>
             <Avatar bot={bot} dark={dark} size={64} ring={p.main} />
             <DetailIdentity bot={bot} writable={writable} save={save} />
-            <SessionIdLine id={currentPart(bot)} testID="bot-session-copy" />
+            <SessionIdLine id={conversationOfPart(bot, currentPart(bot))?.id ?? currentPart(bot)} testID="bot-session-copy" />
           </View>
           <View style={[styles.tabs, { backgroundColor: p.hover }]} accessibilityRole="tablist">
             <View accessibilityRole="tab" accessibilityState={{ selected: true }} style={[styles.tab, { backgroundColor: p.card }]}><Text style={[typeScale.small, { color: p.ink, fontWeight: '500' }]}>{t('Details')}</Text></View>
@@ -358,7 +358,7 @@ function BotSessions({ bot, team, navigation }: { bot: Bot; team: TeamState | nu
   const { p } = useTheme()
   const available = useSessionsAvailable(bot)
   const { pending, error, open, start, starting, canStart, writable, newState } = useSessionSwitch(bot, {
-    onOpened: (entry, readOnly) => openChat(navigation, { kind: 'bot', id: bot.id, ...(readOnly ? { readOnlyPart: entry.id } : {}) }),
+    onOpened: (entry, readOnly) => openChat(navigation, { kind: 'bot', id: bot.id, ...(readOnly ? { readOnlyPart: entry.head } : {}) }),
     onStarted: moved => { if (moved) openChat(navigation, { kind: 'bot', id: bot.id }) },
   })
   const sessions = botSessions(bot, team)

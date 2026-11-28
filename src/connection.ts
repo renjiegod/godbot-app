@@ -38,6 +38,14 @@ export interface ModelOption {
   defaultValue?: string | boolean
 }
 
+export interface BotConversation {
+  id: string
+  head: string
+  parts: string[]
+  current?: boolean
+  background?: boolean
+}
+
 export interface Bot {
   id: string
   name: string
@@ -69,6 +77,10 @@ export interface Bot {
   parts?: string[]
   partOrder?: string[]
   openParts?: { sessionId: string; startedAt?: number; parts?: string[] }[]
+  /** The Bot's conversations as the host groups its parts: the parts of each, oldest
+   * first, its head (the part it goes on in) and its ID, the first part's, which stays
+   * the same when Godbot moves the conversation on to a fresh part. Older hosts send none. */
+  conversations?: BotConversation[]
   waiting?: boolean
   pinned?: boolean
   hidden?: boolean
