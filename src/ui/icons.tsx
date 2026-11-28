@@ -17,6 +17,11 @@ export function ChevronRightIcon({ size = 20, color }: IconProps) {
   return h(Svg, { width: size, height: size, viewBox: '0 0 20 20', fill: 'none', stroke: use(color, p.ink2), strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round' },
     h(Path, { d: 'M7.5 4.5L13 10l-5.5 5.5' }))
 }
+export function ChevronDownIcon({ size = 16, color }: IconProps) {
+  const { p } = useTheme()
+  return h(Svg, { width: size, height: size, viewBox: '0 0 20 20', fill: 'none', stroke: use(color, p.ink2), strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round' },
+    h(Path, { d: 'M5 7.5L10 12.5L15 7.5' }))
+}
 export function SidebarIcon({ size = 20, color }: IconProps) {
   const { p } = useTheme()
   return h(Svg, { width: size, height: size, viewBox: '0 0 20 20', fill: 'none', stroke: use(color, p.ink2), strokeWidth: 1.6 },

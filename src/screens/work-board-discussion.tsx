@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState, type ElementRef } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
 import * as Clipboard from 'expo-clipboard'
 import * as Crypto from 'expo-crypto'
@@ -6,14 +6,16 @@ import { Directory, EncodingType, File, Paths } from 'expo-file-system'
 import * as Sharing from 'expo-sharing'
 import { useTeam } from '../team/context.tsx'
 import { makeBoardCommentLink } from '../team/work-board-link.ts'
+import { BotMentionOptions, useBotMentions } from '../ui/bot-mentions.tsx'
 import { t } from '../ui/i18n.ts'
+import { ChevronDownIcon } from '../ui/icons.tsx'
 import { BotMark } from '../ui/marks.tsx'
 import { radius, shadow, useTheme, type as typeScale } from '../ui/tokens.ts'
 import { BoardField } from './work-board-management.tsx'
 import { Markdown } from './chat/markdown.tsx'
 import { useWorkBoardDiscussion } from '../../godbot/shared/work-board-discussion.js'
 import {
-  chooseCommentAddress, commentAddress, commentFileCount, commentFileLimit, commentLength,
+  commentFileCount, commentFileLimit, commentLength,
   commentPlan, commentReactions, commentRunLabels, commentModes, quoteRanges,
 } from '../../godbot/shared/work-board-discussion-format.js'
 
@@ -91,11 +93,6 @@ export function WorkBoardDiscussion({ id, active, disabled: offline, focus, open
   const [picking, setPicking] = useState(false)
   const [copied, setCopied] = useState<string | null>(null)
   const [action, setAction] = useState<{ id: string; type: 'react' | 'menu' | 'delete' } | null>(null)
-  const [cursor, setCursor] = useState(0)
-  const [address, setAddress] = useState(false)
-  const [placement, setPlacement] = useState<{ start: number; end: number } | undefined>(undefined)
-  const selection = useRef({ start: 0, end: 0 })
-  const input = useRef<ElementRef<typeof TextInput>>(null)
   const focusSeen = useRef<string | undefined>(undefined)
   const [threadOffsets, setThreadOffsets] = useState<Record<string, number>>({})
   const [replyY, setReplyY] = useState<number | null>(null)
@@ -106,21 +103,12 @@ export function WorkBoardDiscussion({ id, active, disabled: offline, focus, open
   }), [draft.body, draft.parent, root, roots?.assignee, draft.quiet, draft.edit, bots])
   const notified = (plan.ids as string[]).filter(botId => !draft.edit?.runs.some(run => run.botId === botId))
   const disabled = offline || !online || !roots || roots.readOnly || !state.reachable || state.busy || picking
-  const suggested = address && !disabled ? commentAddress(draft.body, cursor, bots) : null
+  const mentions = useBotMentions(draft.body, body => setDraft(prior => ({ ...prior, body })), bots, disabled, commentLength)
   const ready = draft.body.trim() || draft.files.length || draft.keep.length || annotations.length
 
   useEffect(() => {
     if (!active) setAction(null)
   }, [active])
-
-  function typeAt(body: string, next: number) {
-    setDraft(prior => ({ ...prior, body }))
-    setCursor(next)
-    setAddress(false)
-    selection.current = { start: next, end: next }
-    setPlacement(selection.current)
-    requestAnimationFrame(() => input.current?.focus())
-  }
 
   function target(entry: Comment, edit = false) {
     if (edit) setDraft({ ...fresh(), body: entry.body, edit: entry, keep: entry.attachments, quiet: entry.quiet })
@@ -128,9 +116,9 @@ export function WorkBoardDiscussion({ id, active, disabled: offline, focus, open
       setDraft(prior => ({ ...(prior.edit ? fresh() : prior), parent: entry }))
       state.openThread(entry.rootId)
     }
-    setAddress(false)
+    mentions.close()
     setAction(null)
-    requestAnimationFrame(() => input.current?.focus())
+    requestAnimationFrame(() => mentions.inputProps.ref.current?.focus())
   }
 
   async function attach() {
@@ -190,7 +178,7 @@ export function WorkBoardDiscussion({ id, active, disabled: offline, focus, open
       setAnnotations([])
       setAnnotation(null)
       setModes({})
-      setAddress(false)
+      mentions.close()
     }
   }
 
@@ -375,26 +363,20 @@ export function WorkBoardDiscussion({ id, active, disabled: offline, focus, open
         </View>)}
         {draft.edit || draft.parent ? <View style={styles.row}>
           {muted(draft.edit ? t('Edit comment') : t('Reply to {name}', { name: name(draft.parent!) }))}
-          {control(t('Cancel'), () => { setDraft(fresh()); setAddress(false); setAnnotations([]); setAnnotation(null); setModes({}) }, state.busy || picking)}
+          {control(t('Cancel'), () => { setDraft(fresh()); mentions.close(); setAnnotations([]); setAnnotation(null); setModes({}) }, state.busy || picking)}
         </View> : null}
-        <TextInput ref={input} multiline maxLength={commentLength} editable={!disabled}
+        <TextInput {...mentions.inputProps} multiline maxLength={commentLength} editable={!disabled}
           accessibilityLabel={t('Comment')} placeholder={t('Write a comment…')} placeholderTextColor={p.ink3}
-          value={draft.body} selection={placement} onFocus={onCompose} onSelectionChange={event => {
-            const next = event.nativeEvent.selection
-            if (placement && next.start === placement.start && next.end === placement.end) setPlacement(undefined)
-            selection.current = next
-            setCursor(next.start)
-          }}
-          onChangeText={body => {
-            setPlacement(undefined)
-            setDraft(prior => ({ ...prior, body }))
-            setAddress(true)
-          }} style={[styles.input, typeScale.settingsRow, { color: p.ink, backgroundColor: p.bubble }]} />
-        {suggested ? <View style={styles.row}>{(suggested.options as Bot[]).map(bot =>
-          control('@' + bot.name, () => {
-            const next = chooseCommentAddress(draft.body, suggested, bot)
-            typeAt(next.body, next.cursor)
-          }, disabled, false, bot.id))}</View> : null}
+          value={draft.body} onFocus={onCompose} onBlur={mentions.close}
+          style={[styles.input, typeScale.settingsRow, { color: p.ink, backgroundColor: p.bubble }]} />
+        <Pressable accessibilityRole="button" accessibilityLabel={t('Mention a Bot')}
+          accessibilityState={{ expanded: mentions.options.length > 0, disabled: disabled || !bots.length }}
+          disabled={disabled || !bots.length} onPress={() => { mentions.toggle(); onCompose() }}
+          style={[styles.control, styles.mentionTrigger, { backgroundColor: p.hover, opacity: disabled || !bots.length ? 0.55 : 1 }]}>
+          <Text style={[typeScale.small, { color: p.ink }]}>{t('Mention a Bot')}</Text>
+          <View style={mentions.options.length ? styles.mentionExpanded : undefined}><ChevronDownIcon size={14} /></View>
+        </Pressable>
+        <BotMentionOptions bots={active ? mentions.options : noBots} choose={mentions.choose} roster={team?.bots} />
         {draft.files.length || draft.keep.length ? <View style={styles.row}>
           {[...draft.keep, ...draft.files].map((file, index) => control(file.name + ' ×', () =>
             setDraft(prior => ({ ...prior, keep: prior.keep.filter(f => f !== file), files: prior.files.filter(f => f !== file) })),
@@ -418,12 +400,6 @@ export function WorkBoardDiscussion({ id, active, disabled: offline, focus, open
         }) : null}
         {!draft.quiet && plan.unmatched ? muted(t('An @mention did not match an available Bot.')) : null}
         <View style={styles.row}>
-          {control(t('Mention a Bot'), () => {
-            const { start, end } = selection.current
-            const at = draft.body.slice(0, start).match(/[\w./@]$/) ? ' @' : '@'
-            typeAt(draft.body.slice(0, start) + at + draft.body.slice(end), start + at.length)
-            setAddress(true)
-          }, disabled || !bots.length)}
           {control(t('Attach files'), () => void attach(), disabled)}
           {control(t('Comment without waking Bots'), () => setDraft(prior => ({ ...prior, quiet: !prior.quiet })), disabled, draft.quiet)}
           {control(t(draft.edit ? 'Save changes' : draft.parent ? 'Send reply' : 'Post comment'),
@@ -441,6 +417,8 @@ const styles = StyleSheet.create({
   comment: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, padding: 10, gap: 7 },
   avatar: { borderRadius: 13, overflow: 'hidden', minWidth: 26, paddingVertical: 4, textAlign: 'center' },
   control: { minHeight: 44, justifyContent: 'center', borderRadius: 7, paddingHorizontal: 9 },
+  mentionTrigger: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 4 },
+  mentionExpanded: { transform: [{ rotate: '180deg' }] },
   composer: { padding: 8, borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, gap: 7 },
   input: { minHeight: 72, maxHeight: 180, borderRadius: 7, padding: 8, textAlignVertical: 'top' },
 })

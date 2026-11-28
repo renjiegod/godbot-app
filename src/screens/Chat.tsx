@@ -286,6 +286,12 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
   }, [call, id, room?.id, chatKey, cursor, page?.sessionId, activePart, refreshTeam])
 
   const sessionId = activePart ?? page?.sessionId ?? room?.id ?? id
+  const mentionBots = useMemo(() => {
+    const bots = team?.bots ?? []
+    if (room === undefined) return bots.filter(item => item.id !== bot?.id)
+    const byId = new Map(bots.map(item => [item.id, item]))
+    return (room.members ?? []).map(member => byId.get(member)).filter(item => item !== undefined)
+  }, [team?.bots, room, bot?.id])
   const question: Question | undefined = team?.questions?.[sessionId]
   const approvals = (team?.work?.approvals ?? []).filter((entry: Approval) => entry.sessionId === sessionId || (entry.roomId !== undefined && entry.roomId === room?.id))
   // The part on screen's own work: while another session of the Bot runs in the
@@ -634,7 +640,9 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
             </Pressable>
           )}
         </View>
-      ) : <Composer key={chatKey} name={bot?.name ?? room?.name ?? ''} conversation={conversation} running={running} canStop={canStop} canAttach={hello?.capabilities?.includes('send-images') === true} onSend={send} onStop={stop} p={p} />}
+      ) : <Composer key={chatKey} name={bot?.name ?? room?.name ?? ''} conversation={conversation} running={running} canStop={canStop}
+        canAttach={hello?.capabilities?.includes('send-images') === true} bots={mentionBots} everyone={room !== undefined && mentionBots.length > 1}
+        onSend={send} onStop={stop} p={p} />}
       <Actions visible={menuText !== null} text={menuText ?? ''} p={p}
         onWork={hello?.capabilities.includes('work-board-v1') && !team?.readOnly && menuItem && ['user','bot','post'].includes(menuItem.kind) && (menuItem.seq??menuItem.id)!=null ? ()=>{
           const origin={botId:bot?.id,roomId:room?.id,sessionId:menuItem.sessionId??sessionId,messageId:String(menuItem.seq??menuItem.id),turnId:menuItem.turn}
