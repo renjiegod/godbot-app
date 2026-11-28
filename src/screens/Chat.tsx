@@ -444,7 +444,7 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
       for (const photo of entry.photos) images.push(((await call('stage-image', { mediaType: photo.mediaType, data: photo.data })) as { id: string }).id)
       // A delayed upload belongs to the part where the message was composed.
       if (key !== latestKey.current) { mark('failed'); return }
-      await call('send', { sessionId: entry.sessionId, text: entry.item.text ?? '', ...(images.length > 0 ? { images } : {}) })
+      await call('send', { sessionId: entry.sessionId, requestId: localId, text: entry.item.text ?? '', ...(images.length > 0 ? { images } : {}) })
       // What the chat already holds, so only a new row of the same text counts as this one.
       const kept = pages.get(key)
       const all = [...(kept?.older ?? []), ...(kept?.page.items ?? [])]
@@ -535,6 +535,7 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
   const canStop = room !== undefined ? roomWork.length > 0 : running
   const inRoom = room !== undefined
   const admin = room?.admin
+  const openBoardItem = useCallback((workItemId: string) => navigation.navigate('WorkBoard', { id: workItemId }), [navigation])
 
   const renderRow = useCallback<ListRenderItem<ChatRow>>(({ item: row }) => {
     if ('tools' in row) return <ToolGroupCard tools={row.tools} p={p} conversation={conversation} open={openSteps[row.key] === true} onToggle={toggleOf(row.key)} />
@@ -544,10 +545,10 @@ export function ChatView({ bot, room, header, onMissing, sessionReadOnly = false
         <Item stamp={row.stamp} author={inRoom && item.botId !== undefined ? botsById.get(item.botId) : undefined} admin={inRoom && item.botId !== undefined && item.botId === admin}
           item={item} p={p} layout={layout} maxWidth={item.kind === 'bot' || item.kind === 'post' ? botMax : userMax} inRoom={inRoom} sessionId={sessionId}
           onLongPress={text=>{setMenuItem(item);setMenuText(text)}} onOpenFile={openFile} onSaveFile={saveFile} onRetry={retry} open={openSteps[row.key]} onToggle={toggleOf(row.key)}
-          onOpenWork={memberWork ? openWork : undefined} showWork={workRows.has(row.key)} />
+          onOpenWork={memberWork ? openWork : undefined} showWork={workRows.has(row.key)} onOpenBoardItem={openBoardItem} />
       </ErrorBoundary>
     )
-  }, [inRoom, botsById, admin, p, layout, conversation, botMax, userMax, sessionId, openFile, saveFile, retry, openSteps, memberWork, openWork, workRows])
+  }, [inRoom, botsById, admin, p, layout, conversation, botMax, userMax, sessionId, openFile, saveFile, retry, openSteps, memberWork, openWork, workRows, openBoardItem])
 
   const empty = page !== null && rows.length === 0
   const failover = bot?.failoverHistory?.find(row => row.sessionId === sessionId)

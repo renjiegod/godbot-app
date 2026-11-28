@@ -15,6 +15,12 @@ export const sourceNames = {
   room: 'Group chat',
   workflow: 'Workflow',
   run: 'Team run',
+  chat: 'Bot chat',
+  delegation: 'Bot delegation',
+  group: 'Group work',
+  goal: 'Goal',
+  schedule: 'Scheduled work',
+  terminal: 'Native terminal',
 }
 export const markNames = {
   draft: 'Draft',

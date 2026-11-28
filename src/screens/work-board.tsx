@@ -80,7 +80,10 @@ type Item = Card & {
   planning?: Plan
   reviewBlocked?: boolean
   evidence?: string
+  evidenceRefs?: string[]
   evidenceRevision?: number
+  lifecycleState?: string
+  nextActor?: string
   origin?: Ref
   execution?: Ref
   children: Child[]
@@ -996,8 +999,13 @@ function BoardContent({ route, navigation }: any) {
                   {item.evidence ? (
                     <SectionCard title={t('Evidence')} badge={'v' + item.evidenceRevision}>
                       {line(item.evidence)}
+                      {item.evidenceRefs?.map(ref => <View key={ref}>{line(ref, true)}</View>)}
                     </SectionCard>
                   ) : null}
+                  {item.lifecycleState && item.nextActor && !['done', 'cancelled'].includes(item.lifecycleState)
+                    ? line(t('Next action by {name}', { name: item.nextActor === 'user' ? t('You')
+                      : item.nextActor === 'host' ? 'Godbot' : owner(item.nextActor) }), true)
+                    : null}
                   {item.hint &&
                   ![item.criteria, item.evidence].some((value) => value?.replace(/\s+/g, ' ').startsWith(item.hint)) ? (
                     <View style={{ padding: 11, borderRadius: radius.row, borderLeftWidth: 3, borderLeftColor: p.accent, backgroundColor: tint(p.accent, 0.1) }}>
