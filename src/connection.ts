@@ -155,6 +155,16 @@ export interface BotGoal {
   checkpoint?: { summary: string; evidence?: string; next?: string }
 }
 
+export interface DeliveryProgress { at: number; text: string; blocked: boolean }
+export interface DelegatedWork {
+  turn: number
+  since: number
+  count: number
+  lastActivityAt: number
+  tool?: string
+  progress?: DeliveryProgress
+}
+
 export interface TeamState {
   revision: number
   unchanged?: boolean
@@ -204,6 +214,7 @@ export interface TeamState {
     approvals?: Approval[]
     waiting?: Record<string, { bots?: string[]; rooms?: string[] }>
     turns?: Record<string, number>
+    delegated?: Record<string, DelegatedWork>
   }
   activity?: Record<string, { tool?: string; said?: string; note?: string; target?: string; switching?: boolean }>
   exchangeTurns?: Record<string, number[]>
